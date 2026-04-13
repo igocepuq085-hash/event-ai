@@ -198,7 +198,7 @@ const initialFormState: FormState = {
   phone: "",
   eventDate: "",
   city: "",
- venue: "",
+  venue: "",
   guestCount: "",
   guestAge: "",
   guestComposition: "",
@@ -464,23 +464,37 @@ export default function QuestionnairePage() {
 
   const handleNextStep = async () => {
     const isValid = validateCurrentStep();
-    if (!isValid) return;
+
+    if (!isValid) {
+      if (step === 1) {
+        alert("Заполните имя, телефон, дату и город.");
+      } else if (step === 2) {
+        alert("Опишите желаемую атмосферу вечера.");
+      } else if (step === 3) {
+        alert("Опишите главных героев мероприятия.");
+      }
+      return;
+    }
 
     if (step < TOTAL_STEPS) {
       setStep((prev) => prev + 1);
+      window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
 
     try {
       setIsSubmitting(true);
 
-      const response = await fetch("http://127.0.0.1:8000/api/questionnaire", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
-      });
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/questionnaire`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(formData),
+        }
+      );
 
       const result = await response.json();
 
@@ -493,6 +507,7 @@ export default function QuestionnairePage() {
       setFormData(initialFormState);
       setErrors({});
       setStep(1);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (error) {
       console.error("Ошибка отправки анкеты:", error);
       alert("Не удалось отправить анкету");
@@ -504,6 +519,7 @@ export default function QuestionnairePage() {
   const handlePrevStep = () => {
     if (step > 1 && !isSubmitting) {
       setStep((prev) => prev - 1);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
 
