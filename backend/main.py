@@ -37,7 +37,10 @@ app.add_middleware(
 )
 
 client = OpenAI()
-AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+
+# Для более сильной агентной логики лучше держать полноценную reasoning-модель.
+AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
+TREND_MODEL = os.getenv("OPENAI_TREND_MODEL", "gpt-5")
 
 railway_mount_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
 if railway_mount_path:
@@ -201,26 +204,90 @@ def try_parse_json(content: str) -> dict:
         start = content.find("{")
         end = content.rfind("}")
         if start != -1 and end != -1 and end > start:
-            cleaned = content[start:end + 1]
+            cleaned = content[start : end + 1]
             return json.loads(cleaned)
         raise
 
 
-def call_model_json(system_prompt: str, user_prompt: str) -> dict:
-    response = client.responses.create(
-        model=AI_MODEL,
-        input=[
+def call_model_json(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    model: Optional[str] = None,
+    enable_web_search: bool = False,
+) -> dict:
+    kwargs = {
+        "model": model or AI_MODEL,
+        "input": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-    )
+    }
+
+    # Web search в Responses API включается через tools.
+    if enable_web_search:
+        kwargs["tools"] = [{"type": "web_search"}]
+
+    response = client.responses.create(**kwargs)
     return try_parse_json(response.output_text)
+
+
+def get_current_event_trends(event_type: str, questionnaire_context: str) -> dict:
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    trend_system = """
+Ты — тренд-аналитик event-индустрии.
+Твоя задача: через web search собрать только актуальные, реально полезные тренды на текущую дату для конкретного типа мероприятия.
+
+Правила:
+- обязательно используй web search
+- работай только с актуальными трендами на сегодня
+- не тащи случайные идеи, которые невозможно применить ведущему на практике
+- особенно смотри:
+  1. тренды по свадебной/корпоративной/event-драматургии
+  2. тренды по вовлечению гостей
+  3. тренды по тону ведения и стилю речи
+  4. тренды по музыкальным решениям и DJ-логике
+  5. что уже считается устаревшим
+- вывод нужен без ссылок и без цитат внутри JSON
+- нужен прикладной, рабочий результат для ведущего мероприятий
+
+Верни строго JSON:
+{
+  "trend_summary": "",
+  "current_trends": [],
+  "outdated_patterns_to_avoid": [],
+  "guest_engagement_trends": [],
+  "music_and_dj_trends": [],
+  "script_style_trends": [],
+  "how_to_apply_to_this_case": []
+}
+"""
+
+    trend_user = f"""
+Текущая дата: {today_str}
+Тип мероприятия: {event_type}
+
+Контекст анкеты:
+{questionnaire_context}
+
+Нужны тренды именно на текущую дату и именно в прикладной event-логике.
+Верни только JSON.
+"""
+
+    return call_model_json(
+        trend_system,
+        trend_user,
+        model=TREND_MODEL,
+        enable_web_search=True,
+    )
 
 
 def generate_agent_program(questionnaire: dict) -> dict:
     context = build_questionnaire_context(questionnaire)
     event_type = questionnaire.get("eventType", "").strip().lower()
 
+    # 1. Аналитик
     analyst_system = """
 Ты — аналитик event-проекта.
 Твоя задача: на основе анкеты вытащить только полезные факты для построения реального сценария.
@@ -294,21 +361,30 @@ def generate_agent_program(questionnaire: dict) -> dict:
 """
     analyst_result = call_model_json(analyst_system, analyst_user)
 
+    # 2. Тренды через web search
+    trend_result = get_current_event_trends(event_type, context)
+
+    # 3. Сценарист
     writer_system = """
 Ты — сильный сценарист мероприятий.
-Твоя задача: построить первый подробный сценарный черновик на основе анкеты и аналитики.
+Твоя задача: построить первый подробный сценарный черновик на основе анкеты, аналитики и актуальных трендов.
 
 Главный приоритет:
-- это должен быть уже почти готовый рабочий сценарий
+- это уже почти готовый рабочий сценарий
 - он должен быть по типу мероприятия: свадьба отдельно, корпоратив отдельно, остальные события отдельно
 - тайминг должен быть расчетным и практичным
 - каждый блок должен содержать полноценную режиссерскую логику
-- текст ведущего должен быть РАЗВЕРНУТЫМ, а не коротким
+- текст ведущего должен быть развернутым
+- стиль ведущего должен быть ОБРАЗНЫМ, МЕТАФОРИЧНЫМ, чуть художественным
+- допустимо даже чуть переборщить с метафорами, если текст остается произносимым и красивым
 
 Критические требования:
-- если у блока ведущий должен говорить 3-5 минут, текст должен быть действительно длинным, как реальная речь, а не 2 предложения
-- в host_text внутри таймлайна пиши полноценный текст, пригодный для чтения и адаптации
-- dj_task не должен быть "включить музыку" — пиши конкретно: тип входа, настроение, пример трековой логики, где стоп, где музыкальный мост
+- если у блока ведущий должен говорить 3-5 минут, текст должен быть действительно длинным, как реальная речь
+- host_text внутри таймлайна пиши полноценным, пригодным для чтения и адаптации
+- ведущий должен не только комментировать, а управлять залом словом
+- в речи должно быть больше образов, сравнений, атмосферных формул
+- учитывай актуальные тренды на текущую дату
+- dj_task не должен быть общим: пиши конкретно, что включать, как заходить, что делать по динамике
 - отделяй работу ведущего, диджея и зала
 - каждый блок должен ощущаться режиссерски
 
@@ -387,10 +463,14 @@ def generate_agent_program(questionnaire: dict) -> dict:
 Аналитика:
 {json.dumps(analyst_result, ensure_ascii=False, indent=2)}
 
+Актуальные тренды:
+{json.dumps(trend_result, ensure_ascii=False, indent=2)}
+
 Верни только JSON.
 """
     writer_result = call_model_json(writer_system, writer_user)
 
+    # 4. Режиссер
     director_system = """
 Ты — режиссер события.
 Твоя задача: критично проверить сценарный черновик с точки зрения постановки, ритма, кульминаций и сценической логики.
@@ -404,6 +484,7 @@ def generate_agent_program(questionnaire: dict) -> dict:
 - особенно проверяй, не слишком ли короткие тексты ведущего
 - особенно проверяй, достаточно ли музыкально конкретны задачи диджея
 - если тексты короткие и не тянут на реальную речь, считай это серьезным недостатком
+- проверь, интегрированы ли актуальные тренды, а не просто перечислены
 
 Верни строго JSON:
 {
@@ -414,6 +495,7 @@ def generate_agent_program(questionnaire: dict) -> dict:
   "direction_fixes": [],
   "dj_fixes": [],
   "host_text_fixes": [],
+  "trend_integration_fixes": [],
   "must_improve_before_final": []
 }
 """
@@ -425,6 +507,9 @@ def generate_agent_program(questionnaire: dict) -> dict:
 Аналитика:
 {json.dumps(analyst_result, ensure_ascii=False, indent=2)}
 
+Тренды:
+{json.dumps(trend_result, ensure_ascii=False, indent=2)}
+
 Черновик сценариста:
 {json.dumps(writer_result, ensure_ascii=False, indent=2)}
 
@@ -432,6 +517,7 @@ def generate_agent_program(questionnaire: dict) -> dict:
 """
     director_result = call_model_json(director_system, director_user)
 
+    # 5. Критик
     critic_system = """
 Ты — жесткий, но профессиональный критик event-продукта.
 Твоя задача: проверить, действительно ли сценарий полезен ведущему в работе.
@@ -448,6 +534,9 @@ def generate_agent_program(questionnaire: dict) -> dict:
 - слишком общий плейлист без трековой конкретики
 - слабую режиссуру
 - невыразительный финал
+- недостаток образности и авторского стиля ведущего
+- если метафоры слабы — укажи это
+- если тренды не встроены в сценарий — укажи это
 
 Верни строго JSON:
 {
@@ -456,6 +545,7 @@ def generate_agent_program(questionnaire: dict) -> dict:
   "what_is_not_practical_enough": [],
   "what_is_weak_for_host": [],
   "what_is_weak_for_dj": [],
+  "what_is_weak_in_style": [],
   "what_is_risky": [],
   "must_fix_now": [],
   "final_readiness_score": 0
@@ -469,6 +559,9 @@ def generate_agent_program(questionnaire: dict) -> dict:
 Аналитика:
 {json.dumps(analyst_result, ensure_ascii=False, indent=2)}
 
+Тренды:
+{json.dumps(trend_result, ensure_ascii=False, indent=2)}
+
 Черновик сценариста:
 {json.dumps(writer_result, ensure_ascii=False, indent=2)}
 
@@ -479,6 +572,7 @@ def generate_agent_program(questionnaire: dict) -> dict:
 """
     critic_result = call_model_json(critic_system, critic_user)
 
+    # 6. Финальная сборка
     final_system = """
 Ты — главный редактор итогового сценария мероприятия.
 Твоя задача: собрать финальную, готовую к работе программу для ведущего.
@@ -486,6 +580,7 @@ def generate_agent_program(questionnaire: dict) -> dict:
 Ты должен взять:
 - анкету клиента
 - аналитику
+- актуальные тренды текущей даты
 - черновик сценариста
 - правки режиссера
 - замечания критика
@@ -501,10 +596,12 @@ def generate_agent_program(questionnaire: dict) -> dict:
 - блоки должны идти как пошаговое действие
 - тайминг должен быть расчетным и практичным
 - тексты ведущего должны быть длинными и читаемыми
-- если речь в блоке ощущается как 3–5 минут, напиши длинный текст, а не краткую заметку
-- если это ключевой блок, host_text должен быть полноценным и содержательным
-- рекомендации диджею должны быть конкретными, с трековой логикой и примерами песен / артистов / типов заходов
+- если речь в блоке ощущается как 3–5 минут, напиши длинный текст
+- стиль ведущего должен быть метафорическим, образным, живым
+- можно чуть переборщить с метафорами, но речь должна оставаться произносимой
+- рекомендации диджею должны быть конкретными, с трековой логикой, примерами треков и связок
 - свадьбы, корпоративы и другие мероприятия должны ощущаться по-разному
+- тренды текущей даты должны быть не отдельной болтовней, а встроенной логикой сценария
 - внутренние роли сценарист, режиссер и критик уже договорились между собой — в финале нужен только сильный итог
 
 Формат работы с музыкой:
@@ -518,6 +615,7 @@ def generate_agent_program(questionnaire: dict) -> dict:
 - host_text в сценарных блоках должен быть действительно полезным
 - допускается писать вариативно, но текст должен быть плотным
 - не надо бояться длины, если длина делает документ рабочим
+- в речи должны быть: образ, метафора, интонационный рисунок, смена температуры
 
 Правила качества:
 - никаких пустых общих фраз
@@ -526,6 +624,8 @@ def generate_agent_program(questionnaire: dict) -> dict:
 - нельзя повторять грубые формулировки клиента буквально, если это небезопасно
 - если нет точного времени старта, но есть якорь, построй реалистичную расчетную сетку и укажи, что это рабочий расчет
 - не делай все блоки одинаковыми по объему: ключевые блоки должны быть развернуты сильнее
+- добавь отдельный блок с ключевыми командами ведущему
+- добавь отдельный блок с тем, что нужно уточнить у клиента до мероприятия, если в анкете есть пробелы
 
 Верни строго JSON:
 {
@@ -556,6 +656,13 @@ def generate_agent_program(questionnaire: dict) -> dict:
     "main_emotional_result": "",
     "why_this_event_will_be_remembered": ""
   },
+  "trend_layer": {
+    "trend_summary": "",
+    "applied_trends": [],
+    "rejected_outdated_patterns": []
+  },
+  "key_host_commands": [],
+  "questions_to_clarify_before_event": [],
   "director_logic": {
     "opening_logic": "",
     "development_logic": "",
@@ -645,6 +752,9 @@ def generate_agent_program(questionnaire: dict) -> dict:
 
 Аналитика:
 {json.dumps(analyst_result, ensure_ascii=False, indent=2)}
+
+Актуальные тренды:
+{json.dumps(trend_result, ensure_ascii=False, indent=2)}
 
 Черновик сценариста:
 {json.dumps(writer_result, ensure_ascii=False, indent=2)}
@@ -760,14 +870,28 @@ def build_docx(submission: dict, program: dict) -> BytesIO:
     add_label_value(document, "Главный эмоциональный результат", concept.get("main_emotional_result", ""))
     add_label_value(document, "Почему вечер запомнится", concept.get("why_this_event_will_be_remembered", ""))
 
+    trend_layer = program.get("trend_layer", {})
+    add_heading(document, "2.4. Актуальные тренды, встроенные в сценарий", level=2)
+    add_label_value(document, "Краткое резюме", trend_layer.get("trend_summary", ""))
+    document.add_paragraph("Что применено:")
+    add_list(document, trend_layer.get("applied_trends", []))
+    document.add_paragraph("Что сознательно отброшено как устаревшее:")
+    add_list(document, trend_layer.get("rejected_outdated_patterns", []))
+
+    add_heading(document, "2.5. Ключевые команды ведущему", level=2)
+    add_list(document, program.get("key_host_commands", []))
+
+    add_heading(document, "2.6. Что уточнить у клиента до мероприятия", level=2)
+    add_list(document, program.get("questions_to_clarify_before_event", []))
+
     director_logic = program.get("director_logic", {})
-    add_heading(document, "2.4. Режиссерская ось", level=2)
+    add_heading(document, "2.7. Режиссерская ось", level=2)
     add_label_value(document, "Логика открытия", director_logic.get("opening_logic", ""))
     add_label_value(document, "Логика развития", director_logic.get("development_logic", ""))
     add_label_value(document, "Логика эмоционального ядра", director_logic.get("family_or_core_emotional_logic", ""))
     add_label_value(document, "Логика финала", director_logic.get("final_logic", ""))
 
-    add_heading(document, "2.5. Пошаговый тайминг", level=2)
+    add_heading(document, "2.8. Пошаговый тайминг", level=2)
     for index, block in enumerate(program.get("scenario_timeline", []), start=1):
         document.add_paragraph(
             f"{index}. {block.get('time_from', '')}–{block.get('time_to', '')} | {block.get('block_title', 'Блок')}"
@@ -782,7 +906,7 @@ def build_docx(submission: dict, program: dict) -> BytesIO:
         add_label_value(document, "Переход", block.get("transition", ""))
 
     host_script = program.get("host_script", {})
-    add_heading(document, "2.6. Тексты ведущего", level=2)
+    add_heading(document, "2.9. Тексты ведущего", level=2)
     add_label_value(document, "Основное открытие", host_script.get("opening_main", ""))
     add_label_value(document, "Короткое открытие", host_script.get("opening_short", ""))
     add_label_value(document, "Welcome-фраза", host_script.get("welcome_line", ""))
@@ -795,7 +919,7 @@ def build_docx(submission: dict, program: dict) -> BytesIO:
     add_label_value(document, "Финальные слова", host_script.get("closing_words", ""))
 
     dj_guidance = program.get("dj_guidance", {})
-    add_heading(document, "2.7. Рекомендации диджею", level=2)
+    add_heading(document, "2.10. Рекомендации диджею", level=2)
     add_label_value(document, "Общая музыкальная политика", dj_guidance.get("overall_music_policy", ""))
     add_label_value(document, "Музыка на welcome", dj_guidance.get("welcome_music", ""))
     add_label_value(document, "Музыка на открытие", dj_guidance.get("opening_music", ""))
@@ -812,7 +936,7 @@ def build_docx(submission: dict, program: dict) -> BytesIO:
     add_list(document, dj_guidance.get("technical_notes", []))
 
     guest_management = program.get("guest_management", {})
-    add_heading(document, "2.8. Работа с гостями", level=2)
+    add_heading(document, "2.11. Работа с гостями", level=2)
     document.add_paragraph("Активные люди:")
     add_list(document, guest_management.get("active_people", []))
     document.add_paragraph("Скромные люди:")
@@ -826,20 +950,20 @@ def build_docx(submission: dict, program: dict) -> BytesIO:
     document.add_paragraph("Управленческие заметки:")
     add_list(document, guest_management.get("management_notes", []))
 
-    add_heading(document, "2.9. Риски", level=2)
+    add_heading(document, "2.12. Риски", level=2)
     for index, risk in enumerate(program.get("risk_map", []), start=1):
         document.add_paragraph(f"{index}. {risk.get('risk', 'Риск')}")
         add_label_value(document, "Почему важно", risk.get("why_it_matters", ""))
         add_label_value(document, "Как предотвратить", risk.get("how_to_prevent", ""))
         add_label_value(document, "Что делать, если случилось", risk.get("what_to_do_if_triggered", ""))
 
-    add_heading(document, "2.10. План Б", level=2)
+    add_heading(document, "2.13. План Б", level=2)
     for index, item in enumerate(program.get("plan_b", []), start=1):
         document.add_paragraph(f"{index}. {item.get('situation', 'Ситуация')}")
         add_label_value(document, "Решение", item.get("solution", ""))
 
     final_print = program.get("final_print_version", {})
-    add_heading(document, "2.11. Краткая версия для печати", level=2)
+    add_heading(document, "2.14. Краткая версия для печати", level=2)
     add_label_value(document, "Название", final_print.get("title", ""))
     add_label_value(document, "Краткое резюме", final_print.get("summary", ""))
     document.add_paragraph("Короткий таймлайн:")
@@ -867,6 +991,7 @@ def root():
         "data_path": str(SUBMISSIONS_FILE),
         "using_railway_volume": bool(railway_mount_path),
         "model": AI_MODEL,
+        "trend_model": TREND_MODEL,
     }
 
 
