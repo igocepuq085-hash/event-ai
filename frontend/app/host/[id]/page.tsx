@@ -68,23 +68,95 @@ type ApiResponse = {
   items: SubmissionRecord[];
 };
 
-type ProgramBlock = {
+type RedFlag = {
+  risk: string;
+  why_it_matters: string;
+  how_to_handle: string;
+};
+
+type TimelineBlock = {
+  block_title: string;
+  block_goal: string;
+  approx_duration: string;
+  what_happens: string;
+  host_task: string;
+  transition_to_next: string;
+};
+
+type InteractiveBlock = {
   title: string;
   goal: string;
-  host_action: string;
-  notes: string;
+  best_moment: string;
+  how_to_run: string;
+  why_it_is_safe: string;
+};
+
+type HumorItem = {
+  line: string;
+  tone: string;
+  where_to_use: string;
+  safety_note: string;
+};
+
+type PlanBItem = {
+  situation: string;
+  response: string;
 };
 
 type ProgramData = {
-  summary?: string;
-  audience?: string;
-  risks?: string[];
-  opening?: string;
-  program_blocks?: ProgramBlock[];
-  jokes?: string[];
-  interactives?: string[];
-  recommendations?: string[];
-  final_strategy?: string;
+  event_brief?: {
+    format?: string;
+    city?: string;
+    venue?: string;
+    date?: string;
+    atmosphere?: string;
+    main_goal?: string;
+    key_moments?: string[];
+    hard_limits?: string[];
+    timing_anchor?: string;
+  };
+  director_concept?: {
+    idea?: string;
+    emotional_arc?: string;
+    host_role?: string;
+    main_impression_for_guests?: string;
+  };
+  red_flags?: RedFlag[];
+  audience_map?: {
+    core_audience?: string;
+    active_guests?: string[];
+    shy_guests?: string[];
+    important_guests?: string[];
+    guests_not_to_involve?: string[];
+    children_notes?: string;
+  };
+  timeline_plan?: TimelineBlock[];
+  host_lines?: {
+    opening_main?: string;
+    opening_short?: string;
+    intro_first_dance?: string;
+    intro_family_block?: string;
+    intro_surprise_block?: string;
+    intro_cake?: string;
+    closing_lines?: string;
+  };
+  interactive_blocks?: InteractiveBlock[];
+  humor_bank?: HumorItem[];
+  plan_b?: PlanBItem[];
+  final_strategy?: {
+    how_to_lead_this_event?: string;
+    what_to_avoid?: string;
+    what_will_make_this_event_strong?: string;
+  };
+  print_version?: {
+    title?: string;
+    event_summary?: string;
+    key_people?: string[];
+    must_do_blocks?: string[];
+    do_not_do?: string[];
+    short_timeline?: string[];
+    host_focus_points?: string[];
+  };
 };
 
 type ProgramResponse = {
@@ -107,6 +179,36 @@ function InfoCard({
       </div>
       <div className="mt-2 text-sm leading-7 text-white/80">
         {value && value.trim() ? value : "Не указано"}
+      </div>
+    </div>
+  );
+}
+
+function ListBlock({
+  title,
+  items,
+}: {
+  title: string;
+  items?: string[];
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+      <div className="text-xs uppercase tracking-[0.18em] text-white/40">
+        {title}
+      </div>
+      <div className="mt-3 space-y-2">
+        {items && items.length > 0 ? (
+          items.map((item, index) => (
+            <div
+              key={`${item}-${index}`}
+              className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80"
+            >
+              {index + 1}. {item}
+            </div>
+          ))
+        ) : (
+          <div className="text-sm text-white/60">Не сформировано</div>
+        )}
       </div>
     </div>
   );
@@ -206,7 +308,7 @@ export default function HostSubmissionPage({
             </h1>
 
             <p className="mt-3 max-w-2xl text-sm leading-7 text-white/65 sm:text-base">
-              Здесь отображается полная анкета клиента и внутренняя программа для ведущего.
+              Здесь отображается полная анкета клиента и рабочая программа для ведущего.
             </p>
           </div>
 
@@ -270,35 +372,54 @@ export default function HostSubmissionPage({
             {program ? (
               <section className="space-y-6 rounded-[28px] border border-white/10 bg-white/5 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.25)] backdrop-blur-xl">
                 <div className="inline-flex rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-white/55">
-                  программа для ведущего
+                  рабочая программа ведущего
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  <InfoCard title="Краткое резюме" value={program.summary} />
-                  <InfoCard title="Разбор аудитории" value={program.audience} />
+                  <InfoCard title="Формат" value={program.event_brief?.format} />
+                  <InfoCard title="Город" value={program.event_brief?.city} />
+                  <InfoCard title="Площадка" value={program.event_brief?.venue} />
+                  <InfoCard title="Дата" value={program.event_brief?.date} />
+                  <InfoCard title="Атмосфера" value={program.event_brief?.atmosphere} />
+                  <InfoCard title="Главная цель" value={program.event_brief?.main_goal} />
+                  <InfoCard title="Тайминговый якорь" value={program.event_brief?.timing_anchor} />
+                </div>
+
+                <ListBlock title="Ключевые моменты" items={program.event_brief?.key_moments} />
+                <ListBlock title="Жесткие ограничения" items={program.event_brief?.hard_limits} />
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <InfoCard title="Режиссерская идея" value={program.director_concept?.idea} />
+                  <InfoCard title="Эмоциональная дуга" value={program.director_concept?.emotional_arc} />
+                  <InfoCard title="Роль ведущего" value={program.director_concept?.host_role} />
+                  <InfoCard
+                    title="Что должны унести гости"
+                    value={program.director_concept?.main_impression_for_guests}
+                  />
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-white/40">
-                    открытие вечера
+                    красные флаги
                   </div>
-                  <div className="mt-2 text-sm leading-7 text-white/80">
-                    {program.opening?.trim() ? program.opening : "Не сформировано"}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                  <div className="text-xs uppercase tracking-[0.18em] text-white/40">
-                    риски
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {program.risks && program.risks.length > 0 ? (
-                      program.risks.map((risk, index) => (
+                  <div className="mt-3 space-y-3">
+                    {program.red_flags && program.red_flags.length > 0 ? (
+                      program.red_flags.map((flag, index) => (
                         <div
-                          key={`${risk}-${index}`}
-                          className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80"
+                          key={`${flag.risk}-${index}`}
+                          className="rounded-xl border border-white/10 bg-white/5 p-4"
                         >
-                          {index + 1}. {risk}
+                          <div className="text-sm font-semibold text-white">
+                            {index + 1}. {flag.risk || "Риск"}
+                          </div>
+                          <div className="mt-2 text-sm text-white/75">
+                            <span className="text-white/45">Почему важно:</span>{" "}
+                            {flag.why_it_matters || "Не указано"}
+                          </div>
+                          <div className="mt-2 text-sm leading-7 text-white/75">
+                            <span className="text-white/45">Как отработать:</span>{" "}
+                            {flag.how_to_handle || "Не указано"}
+                          </div>
                         </div>
                       ))
                     ) : (
@@ -307,31 +428,110 @@ export default function HostSubmissionPage({
                   </div>
                 </div>
 
+                <div className="grid gap-4 md:grid-cols-2">
+                  <InfoCard title="Ядро аудитории" value={program.audience_map?.core_audience} />
+                  <InfoCard title="Дети" value={program.audience_map?.children_notes} />
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <ListBlock title="Активные гости" items={program.audience_map?.active_guests} />
+                  <ListBlock title="Скромные гости" items={program.audience_map?.shy_guests} />
+                  <ListBlock title="Важные гости" items={program.audience_map?.important_guests} />
+                  <ListBlock
+                    title="Кого не вовлекать"
+                    items={program.audience_map?.guests_not_to_involve}
+                  />
+                </div>
+
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-white/40">
-                    блоки программы
+                    план вечера по блокам
                   </div>
                   <div className="mt-3 space-y-3">
-                    {program.program_blocks && program.program_blocks.length > 0 ? (
-                      program.program_blocks.map((block, index) => (
+                    {program.timeline_plan && program.timeline_plan.length > 0 ? (
+                      program.timeline_plan.map((block, index) => (
+                        <div
+                          key={`${block.block_title}-${index}`}
+                          className="rounded-xl border border-white/10 bg-white/5 p-4"
+                        >
+                          <div className="text-sm font-semibold text-white">
+                            {index + 1}. {block.block_title || "Блок"}
+                          </div>
+                          <div className="mt-2 text-sm text-white/75">
+                            <span className="text-white/45">Цель:</span>{" "}
+                            {block.block_goal || "Не указана"}
+                          </div>
+                          <div className="mt-2 text-sm text-white/75">
+                            <span className="text-white/45">Примерная длительность:</span>{" "}
+                            {block.approx_duration || "Не указана"}
+                          </div>
+                          <div className="mt-2 text-sm text-white/75">
+                            <span className="text-white/45">Что происходит:</span>{" "}
+                            {block.what_happens || "Не указано"}
+                          </div>
+                          <div className="mt-2 text-sm text-white/75">
+                            <span className="text-white/45">Задача ведущего:</span>{" "}
+                            {block.host_task || "Не указано"}
+                          </div>
+                          <div className="mt-2 text-sm leading-7 text-white/75">
+                            <span className="text-white/45">Переход дальше:</span>{" "}
+                            {block.transition_to_next || "Не указан"}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-sm text-white/60">Не сформировано</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <InfoCard title="Основное открытие" value={program.host_lines?.opening_main} />
+                  <InfoCard title="Короткое открытие" value={program.host_lines?.opening_short} />
+                  <InfoCard
+                    title="Подводка к первому танцу"
+                    value={program.host_lines?.intro_first_dance}
+                  />
+                  <InfoCard
+                    title="Подводка к семейному блоку"
+                    value={program.host_lines?.intro_family_block}
+                  />
+                  <InfoCard
+                    title="Подводка к сюрпризу"
+                    value={program.host_lines?.intro_surprise_block}
+                  />
+                  <InfoCard title="Подводка к торту" value={program.host_lines?.intro_cake} />
+                  <InfoCard title="Финальные слова" value={program.host_lines?.closing_lines} />
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                  <div className="text-xs uppercase tracking-[0.18em] text-white/40">
+                    интерактивы
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    {program.interactive_blocks && program.interactive_blocks.length > 0 ? (
+                      program.interactive_blocks.map((block, index) => (
                         <div
                           key={`${block.title}-${index}`}
                           className="rounded-xl border border-white/10 bg-white/5 p-4"
                         >
                           <div className="text-sm font-semibold text-white">
-                            {index + 1}. {block.title || "Без названия"}
+                            {index + 1}. {block.title || "Интерактив"}
                           </div>
                           <div className="mt-2 text-sm text-white/75">
-                            <span className="text-white/45">Цель:</span>{" "}
-                            {block.goal || "Не указана"}
+                            <span className="text-white/45">Цель:</span> {block.goal || "Не указана"}
                           </div>
                           <div className="mt-2 text-sm text-white/75">
-                            <span className="text-white/45">Действие ведущего:</span>{" "}
-                            {block.host_action || "Не указано"}
+                            <span className="text-white/45">Когда лучше:</span>{" "}
+                            {block.best_moment || "Не указано"}
+                          </div>
+                          <div className="mt-2 text-sm text-white/75">
+                            <span className="text-white/45">Как провести:</span>{" "}
+                            {block.how_to_run || "Не указано"}
                           </div>
                           <div className="mt-2 text-sm leading-7 text-white/75">
-                            <span className="text-white/45">Нюансы:</span>{" "}
-                            {block.notes || "Не указаны"}
+                            <span className="text-white/45">Почему безопасно:</span>{" "}
+                            {block.why_it_is_safe || "Не указано"}
                           </div>
                         </div>
                       ))
@@ -341,60 +541,29 @@ export default function HostSubmissionPage({
                   </div>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                    <div className="text-xs uppercase tracking-[0.18em] text-white/40">
-                      шутки и подводки
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {program.jokes && program.jokes.length > 0 ? (
-                        program.jokes.map((joke, index) => (
-                          <div
-                            key={`${joke}-${index}`}
-                            className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80"
-                          >
-                            {index + 1}. {joke}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="text-sm text-white/60">Не сформировано</div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                    <div className="text-xs uppercase tracking-[0.18em] text-white/40">
-                      интерактивы
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {program.interactives && program.interactives.length > 0 ? (
-                        program.interactives.map((interactive, index) => (
-                          <div
-                            key={`${interactive}-${index}`}
-                            className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80"
-                          >
-                            {index + 1}. {interactive}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="text-sm text-white/60">Не сформировано</div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-white/40">
-                    рекомендации ведущему
+                    банк мягкого юмора
                   </div>
-                  <div className="mt-3 space-y-2">
-                    {program.recommendations && program.recommendations.length > 0 ? (
-                      program.recommendations.map((line, index) => (
+                  <div className="mt-3 space-y-3">
+                    {program.humor_bank && program.humor_bank.length > 0 ? (
+                      program.humor_bank.map((item, index) => (
                         <div
-                          key={`${line}-${index}`}
-                          className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80"
+                          key={`${item.line}-${index}`}
+                          className="rounded-xl border border-white/10 bg-white/5 p-4"
                         >
-                          {index + 1}. {line}
+                          <div className="text-sm text-white/85">{item.line || "Не указано"}</div>
+                          <div className="mt-2 text-sm text-white/75">
+                            <span className="text-white/45">Тон:</span> {item.tone || "Не указан"}
+                          </div>
+                          <div className="mt-2 text-sm text-white/75">
+                            <span className="text-white/45">Где использовать:</span>{" "}
+                            {item.where_to_use || "Не указано"}
+                          </div>
+                          <div className="mt-2 text-sm leading-7 text-white/75">
+                            <span className="text-white/45">Примечание по безопасности:</span>{" "}
+                            {item.safety_note || "Не указано"}
+                          </div>
                         </div>
                       ))
                     ) : (
@@ -405,13 +574,73 @@ export default function HostSubmissionPage({
 
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                   <div className="text-xs uppercase tracking-[0.18em] text-white/40">
-                    финальная стратегия
+                    план Б
                   </div>
-                  <div className="mt-2 text-sm leading-7 text-white/80">
-                    {program.final_strategy?.trim()
-                      ? program.final_strategy
-                      : "Не сформировано"}
+                  <div className="mt-3 space-y-3">
+                    {program.plan_b && program.plan_b.length > 0 ? (
+                      program.plan_b.map((item, index) => (
+                        <div
+                          key={`${item.situation}-${index}`}
+                          className="rounded-xl border border-white/10 bg-white/5 p-4"
+                        >
+                          <div className="text-sm font-semibold text-white">
+                            {index + 1}. {item.situation || "Ситуация"}
+                          </div>
+                          <div className="mt-2 text-sm leading-7 text-white/75">
+                            <span className="text-white/45">Что делать:</span>{" "}
+                            {item.response || "Не указано"}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-sm text-white/60">Не сформировано</div>
+                    )}
                   </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <InfoCard
+                    title="Как вести этот вечер"
+                    value={program.final_strategy?.how_to_lead_this_event}
+                  />
+                  <InfoCard
+                    title="Чего избегать"
+                    value={program.final_strategy?.what_to_avoid}
+                  />
+                  <InfoCard
+                    title="Что сделает вечер сильным"
+                    value={program.final_strategy?.what_will_make_this_event_strong}
+                  />
+                </div>
+
+                <div className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                  <div className="text-xs uppercase tracking-[0.18em] text-white/40">
+                    печатная версия
+                  </div>
+
+                  <InfoCard title="Название" value={program.print_version?.title} />
+                  <InfoCard
+                    title="Краткое резюме для печати"
+                    value={program.print_version?.event_summary}
+                  />
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <ListBlock title="Ключевые люди" items={program.print_version?.key_people} />
+                    <ListBlock
+                      title="Обязательные блоки"
+                      items={program.print_version?.must_do_blocks}
+                    />
+                    <ListBlock title="Нельзя делать" items={program.print_version?.do_not_do} />
+                    <ListBlock
+                      title="Короткий таймлайн"
+                      items={program.print_version?.short_timeline}
+                    />
+                  </div>
+
+                  <ListBlock
+                    title="Фокус ведущего"
+                    items={program.print_version?.host_focus_points}
+                  />
                 </div>
               </section>
             ) : null}
@@ -426,67 +655,6 @@ export default function HostSubmissionPage({
               <InfoCard title="Количество гостей" value={item.questionnaire.guestCount} />
               <InfoCard title="Возраст гостей" value={item.questionnaire.guestAge} />
               <InfoCard title="Состав гостей" value={item.questionnaire.guestComposition} />
-            </section>
-
-            <section className="grid gap-4 md:grid-cols-2">
-              <InfoCard title="Цель мероприятия" value={item.questionnaire.eventGoal} />
-              <InfoCard title="Желаемая атмосфера" value={item.questionnaire.desiredAtmosphere} />
-              <InfoCard title="Какое впечатление должно остаться" value={item.questionnaire.idealImpression} />
-              <InfoCard title="Обязательные моменты" value={item.questionnaire.mustHaveMoments} />
-              <InfoCard title="Чего не должно быть" value={item.questionnaire.forbiddenTopics} />
-              <InfoCard title="Страхи и переживания" value={item.questionnaire.fears} />
-            </section>
-
-            <section className="grid gap-4 md:grid-cols-2">
-              <InfoCard title="Главные герои" value={item.questionnaire.mainHeroes} />
-              <InfoCard title="Черты характера" value={item.questionnaire.personalityTraits} />
-              <InfoCard title="Ценности" value={item.questionnaire.values} />
-              <InfoCard title="Важные истории" value={item.questionnaire.importantStories} />
-              <InfoCard title="Внутренние шутки" value={item.questionnaire.internalJokes} />
-              <InfoCard title="Безопасные темы" value={item.questionnaire.safeTopics} />
-              <InfoCard title="Табу-темы" value={item.questionnaire.tabooTopics} />
-            </section>
-
-            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              <InfoCard title="Стиль ведущего" value={item.questionnaire.hostStyle} />
-              <InfoCard title="Юмор" value={item.questionnaire.humorPreference} />
-              <InfoCard title="Темп" value={item.questionnaire.tempoPreference} />
-              <InfoCard title="Интерактивы" value={item.questionnaire.interactionPreference} />
-              <InfoCard title="Трогательные моменты" value={item.questionnaire.touchingMoments} />
-              <InfoCard title="Современность / классика" value={item.questionnaire.modernVsClassic} />
-            </section>
-
-            <section className="grid gap-4 md:grid-cols-2">
-              <InfoCard title="Активные гости" value={item.questionnaire.activeGuests} />
-              <InfoCard title="Скромные гости" value={item.questionnaire.shyGuests} />
-              <InfoCard title="Важные гости" value={item.questionnaire.importantGuests} />
-              <InfoCard title="Конфликтные риски" value={item.questionnaire.conflictRisks} />
-              <InfoCard title="Дети" value={item.questionnaire.childrenPresence} />
-              <InfoCard title="Кого не вовлекать" value={item.questionnaire.whoNotToInvolve} />
-            </section>
-
-            <section className="grid gap-4 md:grid-cols-2">
-              <InfoCard title="Музыкальные предпочтения" value={item.questionnaire.musicPreferences} />
-              <InfoCard title="Любимые артисты" value={item.questionnaire.favoriteArtists} />
-              <InfoCard title="Запрещенная музыка" value={item.questionnaire.bannedMusic} />
-              <InfoCard title="Танцевальный блок" value={item.questionnaire.danceBlockNeed} />
-              <InfoCard title="Церемонии и официальные блоки" value={item.questionnaire.ceremonyNeed} />
-              <InfoCard title="Сюрпризы" value={item.questionnaire.surpriseNeed} />
-            </section>
-
-            <section className="grid gap-4 md:grid-cols-2">
-              <InfoCard title="Нежелательные конкурсы" value={item.questionnaire.contestsNo} />
-              <InfoCard title="Чувствительные темы" value={item.questionnaire.sensitiveTopics} />
-              <InfoCard title="Культурные ограничения" value={item.questionnaire.culturalLimits} />
-              <InfoCard title="Логистические ограничения" value={item.questionnaire.logisticsLimits} />
-              <InfoCard title="Замечания по таймингу" value={item.questionnaire.timingNotes} />
-              <InfoCard title="Жесткое нет" value={item.questionnaire.hardNo} />
-            </section>
-
-            <section className="grid gap-4 md:grid-cols-2">
-              <InfoCard title="Финальные пожелания" value={item.questionnaire.finalWishes} />
-              <InfoCard title="Дополнительные детали" value={item.questionnaire.additionalDetails} />
-              <InfoCard title="Референсы и ориентиры" value={item.questionnaire.references} />
             </section>
           </div>
         ) : null}
