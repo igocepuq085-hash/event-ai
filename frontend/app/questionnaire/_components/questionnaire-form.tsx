@@ -35,6 +35,7 @@ type QuestionnairePayload = {
   guestsList?: string;
   conflictTopics?: string;
   likedFormats?: string;
+  keyMoments?: string;
   celebrantName?: string;
   celebrantAge?: string;
   familyMembers?: string;
@@ -82,6 +83,7 @@ const WEDDING_FIELDS: TextFieldConfig[] = [
   { key: "guestsList", label: "Ключевые гости и особенности", rows: 4 },
   { key: "conflictTopics", label: "Чувствительные темы" },
   { key: "likedFormats", label: "Нравящиеся форматы/конкурсы" },
+  { key: "keyMoments", label: "3–5 самых важных моментов вечера" },
 ];
 
 const JUBILEE_FIELDS: TextFieldConfig[] = [
@@ -89,7 +91,7 @@ const JUBILEE_FIELDS: TextFieldConfig[] = [
   { key: "celebrantAge", label: "Возраст юбиляра" },
   { key: "familyMembers", label: "Семья юбиляра" },
   { key: "anniversaryAtmosphere", label: "Атмосфера юбилея" },
-  { key: "keyMoments", label: "Обязательные моменты вечера" },
+  { key: "keyMoments", label: "3–5 самых важных моментов вечера" },
   { key: "biographyStory", label: "Биография и путь" },
   { key: "achievements", label: "Достижения" },
   { key: "lifeStages", label: "Ключевые этапы жизни" },

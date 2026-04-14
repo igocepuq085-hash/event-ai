@@ -84,6 +84,7 @@ class QuestionnaireSubmission(BaseModel):
     guestsList: Optional[str] = ""
     conflictTopics: Optional[str] = ""
     likedFormats: Optional[str] = ""
+    keyMoments: Optional[str] = ""
 
     # jubilee
     celebrantName: Optional[str] = ""
