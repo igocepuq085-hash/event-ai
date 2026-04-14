@@ -390,8 +390,31 @@ def generate_ai_program(questionnaire: dict) -> dict:
 
 
 def safe_filename(value: str) -> str:
-    cleaned = re.sub(r'[\\/:*?"<>|]', "", value).strip()
-    cleaned = re.sub(r"\s+", "_", cleaned)
+    translit_map = {
+        "а": "a", "б": "b", "в": "v", "г": "g", "д": "d",
+        "е": "e", "ё": "e", "ж": "zh", "з": "z", "и": "i",
+        "й": "y", "к": "k", "л": "l", "м": "m", "н": "n",
+        "о": "o", "п": "p", "р": "r", "с": "s", "т": "t",
+        "у": "u", "ф": "f", "х": "h", "ц": "ts", "ч": "ch",
+        "ш": "sh", "щ": "sch", "ъ": "", "ы": "y", "ь": "",
+        "э": "e", "ю": "yu", "я": "ya",
+    }
+
+    value = value.strip().lower()
+    result = []
+
+    for char in value:
+        lower_char = char.lower()
+        if lower_char in translit_map:
+            result.append(translit_map[lower_char])
+        elif char.isalnum():
+            result.append(char)
+        elif char in [" ", "-", "_"]:
+            result.append("_")
+
+    cleaned = "".join(result)
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+
     return cleaned or "anketa"
 
 
