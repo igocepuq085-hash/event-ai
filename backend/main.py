@@ -119,6 +119,13 @@ def save_submissions(submissions: list) -> None:
         json.dump(submissions, file, ensure_ascii=False, indent=2)
 
 
+def find_submission_index(submissions: list, submission_id: str) -> int:
+    for index, item in enumerate(submissions):
+        if item.get("id") == submission_id:
+            return index
+    return -1
+
+
 def get_questionnaire_labels() -> dict:
     return {
         "eventType": "Тип мероприятия",
@@ -387,14 +394,23 @@ def generate_agent_program(questionnaire: dict) -> dict:
 Верни только JSON.
 """
 
-    response = client.responses.create(
-        model=AI_MODEL,
-        input=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    )
-    return try_parse_json(response.output_text)
+    last_error = None
+
+    for _ in range(2):
+        try:
+            response = client.responses.create(
+                model=AI_MODEL,
+                reasoning={"effort": "low"},
+                input=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+            return try_parse_json(response.output_text)
+        except Exception as error:
+            last_error = error
+
+    raise RuntimeError(f"Не удалось получить валидный JSON сценария: {last_error}")
 
 
 def safe_filename(value: str) -> str:
@@ -676,33 +692,56 @@ def get_submission_by_id(submission_id: str):
 @app.post("/api/submissions/{submission_id}/generate-program")
 def generate_program(submission_id: str):
     submissions = load_submissions()
-    found_item = next((item for item in submissions if item["id"] == submission_id), None)
+    found_index = find_submission_index(submissions, submission_id)
 
-    if not found_item:
+    if found_index == -1:
         raise HTTPException(status_code=404, detail="Анкета не найдена")
+
+    found_item = submissions[found_index]
+    cached_program = found_item.get("program")
+    if isinstance(cached_program, dict):
+        return {
+            "status": "success",
+            "submissionId": submission_id,
+            "program": cached_program,
+            "cached": True,
+        }
 
     try:
         program = generate_agent_program(found_item["questionnaire"])
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Ошибка генерации программы: {error}")
 
+    submissions[found_index]["program"] = program
+    save_submissions(submissions)
+
     return {
         "status": "success",
         "submissionId": submission_id,
-        "program": program
+        "program": program,
+        "cached": False,
     }
 
 
 @app.get("/api/submissions/{submission_id}/export-docx")
 def export_docx(submission_id: str):
     submissions = load_submissions()
-    found_item = next((item for item in submissions if item["id"] == submission_id), None)
+    found_index = find_submission_index(submissions, submission_id)
 
-    if not found_item:
+    if found_index == -1:
         raise HTTPException(status_code=404, detail="Анкета не найдена")
 
+    found_item = submissions[found_index]
+
     try:
-        program = generate_agent_program(found_item["questionnaire"])
+        cached_program = found_item.get("program")
+        if isinstance(cached_program, dict):
+            program = cached_program
+        else:
+            program = generate_agent_program(found_item["questionnaire"])
+            submissions[found_index]["program"] = program
+            save_submissions(submissions)
+
         file_buffer = build_docx(found_item, program)
 
         client_name = safe_filename(found_item["questionnaire"].get("clientName", "anketa"))

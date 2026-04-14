@@ -1,0 +1,62 @@
+import requests
+
+url = "https://event-ai-production-5eae.up.railway.app/api/questionnaire"
+
+payload = {
+    "eventType": "wedding",
+    "clientName": "Антон",
+    "secondName": "",
+    "phone": "+79222569261",
+    "eventDate": "2026-04-27",
+    "city": "Сургут",
+    "venue": "Облака",
+    "guestCount": "",
+    "guestAge": "",
+    "guestComposition": "",
+    "eventGoal": "Семейная, душевная, но с юмором.",
+    "desiredAtmosphere": "Тепло, красиво душевно.",
+    "idealImpression": "Чтобы вспоминали праздник ещё много много лет.",
+    "mustHaveMoments": "Первый танец, каравай, танец невесты с отцом.",
+    "forbiddenTopics": "Драка",
+    "fears": "Очень волнуюсь за дядю жениха",
+    "mainHeroes": "Невеста красивая, но не слишком умная. Жених: умный но не слишком красивый.",
+    "personalityTraits": "С юмором, любим петь песни и танцевать под дождем.",
+    "values": "Дружная семья, где понимают друг друга.",
+    "importantStories": "Поездка в Тюмень, где сделали предложение.",
+    "internalJokes": "Емае, семен семеныч",
+    "safeTopics": "Про все кроме религии",
+    "tabooTopics": "Про мамину подругу",
+    "hostStyle": "Легкий и современный",
+    "humorPreference": "Умеренный, без перегибов",
+    "tempoPreference": "Динамичный и насыщенный",
+    "interactionPreference": "Лучше мягкое вовлечение",
+    "touchingMoments": "Семейный очаг",
+    "modernVsClassic": "Классика",
+    "activeGuests": "Друг жениха Серега",
+    "shyGuests": "Подруга невесты Катя",
+    "importantGuests": "Семен семеныч",
+    "conflictRisks": "Нет таких",
+    "childrenPresence": "3 детей до 10 лет",
+    "whoNotToInvolve": "Дедушку",
+    "musicPreferences": "Рок и попса",
+    "favoriteArtists": "Жуков и Ивпнушки",
+    "bannedMusic": "Профессор Лебединский",
+    "danceBlockNeed": "3 блока",
+    "ceremonyNeed": "Конкчно",
+    "surpriseNeed": "Да. Сестра жениха будет танцевать.",
+    "contestsNo": "Карандаш в бутылочку",
+    "sensitiveTopics": "Иран",
+    "culturalLimits": "Нет",
+    "logisticsLimits": "Таких нет",
+    "timingNotes": "Торт должен быть в 22 00",
+    "hardNo": "Бывшего мужа невесты",
+    "finalWishes": "",
+    "additionalDetails": "",
+    "references": ""
+}
+
+response = requests.post(url, json=payload, timeout=60)
+
+print("STATUS:", response.status_code)
+print("BODY:")
+print(response.text)

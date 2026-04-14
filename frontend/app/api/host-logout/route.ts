@@ -1,12 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   const response = NextResponse.json({ status: "ok" });
 
   response.cookies.set("host_auth", "", {
     httpOnly: true,
     sameSite: "lax",
-    secure: true,
+    secure: request.nextUrl.protocol === "https:",
     path: "/",
     maxAge: 0,
   });
