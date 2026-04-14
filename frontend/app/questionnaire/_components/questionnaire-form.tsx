@@ -40,7 +40,6 @@ type QuestionnairePayload = {
   celebrantAge?: string;
   familyMembers?: string;
   anniversaryAtmosphere?: string;
-  keyMoments?: string;
   biographyStory?: string;
   achievements?: string;
   lifeStages?: string;
