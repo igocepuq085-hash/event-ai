@@ -242,7 +242,9 @@ export default function HostSubmissionPage({
           throw new Error("Не удалось загрузить анкету");
         }
 
-        const foundItem = data.items.find((entry) => entry.id === resolvedParams.id);
+        const foundItem = data.items.find(
+          (entry) => entry.id === resolvedParams.id
+        );
 
         if (!foundItem) {
           setError("Анкета не найдена");
@@ -294,6 +296,15 @@ export default function HostSubmissionPage({
     }
   };
 
+  const handleDownloadDocx = () => {
+    if (!submissionId) return;
+
+    window.open(
+      `${process.env.NEXT_PUBLIC_API_URL}/api/submissions/${submissionId}/export-docx`,
+      "_blank"
+    );
+  };
+
   return (
     <main className="min-h-screen bg-[#07070b] px-4 py-6 text-white sm:px-6 sm:py-10">
       <div className="mx-auto max-w-6xl">
@@ -308,7 +319,8 @@ export default function HostSubmissionPage({
             </h1>
 
             <p className="mt-3 max-w-2xl text-sm leading-7 text-white/65 sm:text-base">
-              Здесь отображается полная анкета клиента и рабочая программа для ведущего.
+              Здесь отображается полная анкета клиента и рабочая программа для
+              ведущего.
             </p>
           </div>
 
@@ -320,6 +332,15 @@ export default function HostSubmissionPage({
               className="rounded-full bg-white px-5 py-3 text-sm font-medium text-neutral-950 transition hover:scale-[1.02] disabled:opacity-50"
             >
               {programLoading ? "Формирование..." : "Сформировать программу"}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDownloadDocx}
+              disabled={loading || !!error}
+              className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/75 transition hover:bg-white/10 disabled:opacity-50"
+            >
+              Скачать Word
             </button>
 
             <Link
@@ -378,23 +399,52 @@ export default function HostSubmissionPage({
                 <div className="grid gap-4 md:grid-cols-2">
                   <InfoCard title="Формат" value={program.event_brief?.format} />
                   <InfoCard title="Город" value={program.event_brief?.city} />
-                  <InfoCard title="Площадка" value={program.event_brief?.venue} />
+                  <InfoCard
+                    title="Площадка"
+                    value={program.event_brief?.venue}
+                  />
                   <InfoCard title="Дата" value={program.event_brief?.date} />
-                  <InfoCard title="Атмосфера" value={program.event_brief?.atmosphere} />
-                  <InfoCard title="Главная цель" value={program.event_brief?.main_goal} />
-                  <InfoCard title="Тайминговый якорь" value={program.event_brief?.timing_anchor} />
+                  <InfoCard
+                    title="Атмосфера"
+                    value={program.event_brief?.atmosphere}
+                  />
+                  <InfoCard
+                    title="Главная цель"
+                    value={program.event_brief?.main_goal}
+                  />
+                  <InfoCard
+                    title="Тайминговый якорь"
+                    value={program.event_brief?.timing_anchor}
+                  />
                 </div>
 
-                <ListBlock title="Ключевые моменты" items={program.event_brief?.key_moments} />
-                <ListBlock title="Жесткие ограничения" items={program.event_brief?.hard_limits} />
+                <ListBlock
+                  title="Ключевые моменты"
+                  items={program.event_brief?.key_moments}
+                />
+                <ListBlock
+                  title="Жесткие ограничения"
+                  items={program.event_brief?.hard_limits}
+                />
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  <InfoCard title="Режиссерская идея" value={program.director_concept?.idea} />
-                  <InfoCard title="Эмоциональная дуга" value={program.director_concept?.emotional_arc} />
-                  <InfoCard title="Роль ведущего" value={program.director_concept?.host_role} />
+                  <InfoCard
+                    title="Режиссерская идея"
+                    value={program.director_concept?.idea}
+                  />
+                  <InfoCard
+                    title="Эмоциональная дуга"
+                    value={program.director_concept?.emotional_arc}
+                  />
+                  <InfoCard
+                    title="Роль ведущего"
+                    value={program.director_concept?.host_role}
+                  />
                   <InfoCard
                     title="Что должны унести гости"
-                    value={program.director_concept?.main_impression_for_guests}
+                    value={
+                      program.director_concept?.main_impression_for_guests
+                    }
                   />
                 </div>
 
@@ -413,30 +463,51 @@ export default function HostSubmissionPage({
                             {index + 1}. {flag.risk || "Риск"}
                           </div>
                           <div className="mt-2 text-sm text-white/75">
-                            <span className="text-white/45">Почему важно:</span>{" "}
+                            <span className="text-white/45">
+                              Почему важно:
+                            </span>{" "}
                             {flag.why_it_matters || "Не указано"}
                           </div>
                           <div className="mt-2 text-sm leading-7 text-white/75">
-                            <span className="text-white/45">Как отработать:</span>{" "}
+                            <span className="text-white/45">
+                              Как отработать:
+                            </span>{" "}
                             {flag.how_to_handle || "Не указано"}
                           </div>
                         </div>
                       ))
                     ) : (
-                      <div className="text-sm text-white/60">Не сформировано</div>
+                      <div className="text-sm text-white/60">
+                        Не сформировано
+                      </div>
                     )}
                   </div>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  <InfoCard title="Ядро аудитории" value={program.audience_map?.core_audience} />
-                  <InfoCard title="Дети" value={program.audience_map?.children_notes} />
+                  <InfoCard
+                    title="Ядро аудитории"
+                    value={program.audience_map?.core_audience}
+                  />
+                  <InfoCard
+                    title="Дети"
+                    value={program.audience_map?.children_notes}
+                  />
                 </div>
 
                 <div className="grid gap-4 lg:grid-cols-2">
-                  <ListBlock title="Активные гости" items={program.audience_map?.active_guests} />
-                  <ListBlock title="Скромные гости" items={program.audience_map?.shy_guests} />
-                  <ListBlock title="Важные гости" items={program.audience_map?.important_guests} />
+                  <ListBlock
+                    title="Активные гости"
+                    items={program.audience_map?.active_guests}
+                  />
+                  <ListBlock
+                    title="Скромные гости"
+                    items={program.audience_map?.shy_guests}
+                  />
+                  <ListBlock
+                    title="Важные гости"
+                    items={program.audience_map?.important_guests}
+                  />
                   <ListBlock
                     title="Кого не вовлекать"
                     items={program.audience_map?.guests_not_to_involve}
@@ -462,32 +533,48 @@ export default function HostSubmissionPage({
                             {block.block_goal || "Не указана"}
                           </div>
                           <div className="mt-2 text-sm text-white/75">
-                            <span className="text-white/45">Примерная длительность:</span>{" "}
+                            <span className="text-white/45">
+                              Примерная длительность:
+                            </span>{" "}
                             {block.approx_duration || "Не указана"}
                           </div>
                           <div className="mt-2 text-sm text-white/75">
-                            <span className="text-white/45">Что происходит:</span>{" "}
+                            <span className="text-white/45">
+                              Что происходит:
+                            </span>{" "}
                             {block.what_happens || "Не указано"}
                           </div>
                           <div className="mt-2 text-sm text-white/75">
-                            <span className="text-white/45">Задача ведущего:</span>{" "}
+                            <span className="text-white/45">
+                              Задача ведущего:
+                            </span>{" "}
                             {block.host_task || "Не указано"}
                           </div>
                           <div className="mt-2 text-sm leading-7 text-white/75">
-                            <span className="text-white/45">Переход дальше:</span>{" "}
+                            <span className="text-white/45">
+                              Переход дальше:
+                            </span>{" "}
                             {block.transition_to_next || "Не указан"}
                           </div>
                         </div>
                       ))
                     ) : (
-                      <div className="text-sm text-white/60">Не сформировано</div>
+                      <div className="text-sm text-white/60">
+                        Не сформировано
+                      </div>
                     )}
                   </div>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  <InfoCard title="Основное открытие" value={program.host_lines?.opening_main} />
-                  <InfoCard title="Короткое открытие" value={program.host_lines?.opening_short} />
+                  <InfoCard
+                    title="Основное открытие"
+                    value={program.host_lines?.opening_main}
+                  />
+                  <InfoCard
+                    title="Короткое открытие"
+                    value={program.host_lines?.opening_short}
+                  />
                   <InfoCard
                     title="Подводка к первому танцу"
                     value={program.host_lines?.intro_first_dance}
@@ -500,8 +587,14 @@ export default function HostSubmissionPage({
                     title="Подводка к сюрпризу"
                     value={program.host_lines?.intro_surprise_block}
                   />
-                  <InfoCard title="Подводка к торту" value={program.host_lines?.intro_cake} />
-                  <InfoCard title="Финальные слова" value={program.host_lines?.closing_lines} />
+                  <InfoCard
+                    title="Подводка к торту"
+                    value={program.host_lines?.intro_cake}
+                  />
+                  <InfoCard
+                    title="Финальные слова"
+                    value={program.host_lines?.closing_lines}
+                  />
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
@@ -509,7 +602,8 @@ export default function HostSubmissionPage({
                     интерактивы
                   </div>
                   <div className="mt-3 space-y-3">
-                    {program.interactive_blocks && program.interactive_blocks.length > 0 ? (
+                    {program.interactive_blocks &&
+                    program.interactive_blocks.length > 0 ? (
                       program.interactive_blocks.map((block, index) => (
                         <div
                           key={`${block.title}-${index}`}
@@ -519,24 +613,33 @@ export default function HostSubmissionPage({
                             {index + 1}. {block.title || "Интерактив"}
                           </div>
                           <div className="mt-2 text-sm text-white/75">
-                            <span className="text-white/45">Цель:</span> {block.goal || "Не указана"}
+                            <span className="text-white/45">Цель:</span>{" "}
+                            {block.goal || "Не указана"}
                           </div>
                           <div className="mt-2 text-sm text-white/75">
-                            <span className="text-white/45">Когда лучше:</span>{" "}
+                            <span className="text-white/45">
+                              Когда лучше:
+                            </span>{" "}
                             {block.best_moment || "Не указано"}
                           </div>
                           <div className="mt-2 text-sm text-white/75">
-                            <span className="text-white/45">Как провести:</span>{" "}
+                            <span className="text-white/45">
+                              Как провести:
+                            </span>{" "}
                             {block.how_to_run || "Не указано"}
                           </div>
                           <div className="mt-2 text-sm leading-7 text-white/75">
-                            <span className="text-white/45">Почему безопасно:</span>{" "}
+                            <span className="text-white/45">
+                              Почему безопасно:
+                            </span>{" "}
                             {block.why_it_is_safe || "Не указано"}
                           </div>
                         </div>
                       ))
                     ) : (
-                      <div className="text-sm text-white/60">Не сформировано</div>
+                      <div className="text-sm text-white/60">
+                        Не сформировано
+                      </div>
                     )}
                   </div>
                 </div>
@@ -552,22 +655,31 @@ export default function HostSubmissionPage({
                           key={`${item.line}-${index}`}
                           className="rounded-xl border border-white/10 bg-white/5 p-4"
                         >
-                          <div className="text-sm text-white/85">{item.line || "Не указано"}</div>
-                          <div className="mt-2 text-sm text-white/75">
-                            <span className="text-white/45">Тон:</span> {item.tone || "Не указан"}
+                          <div className="text-sm text-white/85">
+                            {item.line || "Не указано"}
                           </div>
                           <div className="mt-2 text-sm text-white/75">
-                            <span className="text-white/45">Где использовать:</span>{" "}
+                            <span className="text-white/45">Тон:</span>{" "}
+                            {item.tone || "Не указан"}
+                          </div>
+                          <div className="mt-2 text-sm text-white/75">
+                            <span className="text-white/45">
+                              Где использовать:
+                            </span>{" "}
                             {item.where_to_use || "Не указано"}
                           </div>
                           <div className="mt-2 text-sm leading-7 text-white/75">
-                            <span className="text-white/45">Примечание по безопасности:</span>{" "}
+                            <span className="text-white/45">
+                              Примечание по безопасности:
+                            </span>{" "}
                             {item.safety_note || "Не указано"}
                           </div>
                         </div>
                       ))
                     ) : (
-                      <div className="text-sm text-white/60">Не сформировано</div>
+                      <div className="text-sm text-white/60">
+                        Не сформировано
+                      </div>
                     )}
                   </div>
                 </div>
@@ -593,7 +705,9 @@ export default function HostSubmissionPage({
                         </div>
                       ))
                     ) : (
-                      <div className="text-sm text-white/60">Не сформировано</div>
+                      <div className="text-sm text-white/60">
+                        Не сформировано
+                      </div>
                     )}
                   </div>
                 </div>
@@ -618,19 +732,28 @@ export default function HostSubmissionPage({
                     печатная версия
                   </div>
 
-                  <InfoCard title="Название" value={program.print_version?.title} />
+                  <InfoCard
+                    title="Название"
+                    value={program.print_version?.title}
+                  />
                   <InfoCard
                     title="Краткое резюме для печати"
                     value={program.print_version?.event_summary}
                   />
 
                   <div className="grid gap-4 lg:grid-cols-2">
-                    <ListBlock title="Ключевые люди" items={program.print_version?.key_people} />
+                    <ListBlock
+                      title="Ключевые люди"
+                      items={program.print_version?.key_people}
+                    />
                     <ListBlock
                       title="Обязательные блоки"
                       items={program.print_version?.must_do_blocks}
                     />
-                    <ListBlock title="Нельзя делать" items={program.print_version?.do_not_do} />
+                    <ListBlock
+                      title="Нельзя делать"
+                      items={program.print_version?.do_not_do}
+                    />
                     <ListBlock
                       title="Короткий таймлайн"
                       items={program.print_version?.short_timeline}
@@ -646,15 +769,33 @@ export default function HostSubmissionPage({
             ) : null}
 
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              <InfoCard title="Имя клиента" value={item.questionnaire.clientName} />
-              <InfoCard title="Второй герой" value={item.questionnaire.secondName} />
+              <InfoCard
+                title="Имя клиента"
+                value={item.questionnaire.clientName}
+              />
+              <InfoCard
+                title="Второй герой"
+                value={item.questionnaire.secondName}
+              />
               <InfoCard title="Телефон" value={item.questionnaire.phone} />
-              <InfoCard title="Дата события" value={item.questionnaire.eventDate} />
+              <InfoCard
+                title="Дата события"
+                value={item.questionnaire.eventDate}
+              />
               <InfoCard title="Город" value={item.questionnaire.city} />
               <InfoCard title="Площадка" value={item.questionnaire.venue} />
-              <InfoCard title="Количество гостей" value={item.questionnaire.guestCount} />
-              <InfoCard title="Возраст гостей" value={item.questionnaire.guestAge} />
-              <InfoCard title="Состав гостей" value={item.questionnaire.guestComposition} />
+              <InfoCard
+                title="Количество гостей"
+                value={item.questionnaire.guestCount}
+              />
+              <InfoCard
+                title="Возраст гостей"
+                value={item.questionnaire.guestAge}
+              />
+              <InfoCard
+                title="Состав гостей"
+                value={item.questionnaire.guestComposition}
+              />
             </section>
           </div>
         ) : null}
