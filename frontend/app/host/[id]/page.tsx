@@ -9,12 +9,12 @@ type SubmissionRecord = {
   id: string;
   created_at: string;
   questionnaire: Questionnaire;
+  program?: ProgramData;
 };
 
-type ApiResponse = {
+type SubmissionResponse = {
   status: string;
-  count: number;
-  items: SubmissionRecord[];
+  item: SubmissionRecord;
 };
 
 type ScenarioTimelineBlock = {
@@ -135,6 +135,54 @@ type ProgramResponse = {
   status: string;
   submissionId: string;
   program: ProgramData;
+  cached?: boolean;
+};
+
+const QUESTIONNAIRE_LABELS: Record<string, string> = {
+  eventType: "Тип мероприятия",
+  clientName: "Название заявки",
+  phone: "Телефон",
+  eventDate: "Дата события",
+  city: "Город",
+  venue: "Площадка",
+  startTime: "Время начала",
+  guestCount: "Количество гостей",
+  childrenInfo: "Дети",
+  atmosphere: "Атмосфера",
+  fears: "Страхи и переживания",
+  hostWishes: "Пожелания к ведущему",
+  references: "Референсы",
+  musicLikes: "Любимая музыка",
+  musicBans: "Стоп-лист музыки",
+  groomName: "Имя жениха",
+  brideName: "Имя невесты",
+  weddingTraditions: "Свадебные традиции",
+  groomParents: "Родители жениха",
+  brideParents: "Родители невесты",
+  grandparents: "Бабушки и дедушки",
+  loveStory: "История знакомства",
+  coupleValues: "Ценности пары",
+  importantDates: "Важные даты",
+  proposalStory: "История предложения",
+  nicknames: "Ласковые имена",
+  insideJokes: "Внутренние шутки",
+  guestsList: "Ключевые гости",
+  conflictTopics: "Чувствительные темы",
+  likedFormats: "Нравящиеся форматы",
+  celebrantName: "Имя юбиляра",
+  celebrantAge: "Возраст юбиляра",
+  familyMembers: "Семья юбиляра",
+  anniversaryAtmosphere: "Атмосфера юбилея",
+  keyMoments: "Ключевые моменты",
+  biographyStory: "Биография",
+  achievements: "Достижения",
+  lifeStages: "Этапы жизни",
+  characterTraits: "Черты характера",
+  funnyFacts: "Факты и фразы",
+  importantGuests: "Важные гости",
+  jubileeConflictTopics: "Чувствительные темы",
+  jubileeLikedFormats: "Нравящиеся форматы",
+  whatCannotBeDone: "Что нельзя делать",
 };
 
 function InfoCard({
@@ -212,24 +260,18 @@ export default function HostSubmissionPage({
         setSubmissionId(resolvedParams.id);
 
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/api/submissions`
+          `${process.env.NEXT_PUBLIC_API_URL}/api/submissions/${resolvedParams.id}`
         );
-        const data: ApiResponse = await response.json();
+        const data: SubmissionResponse = await response.json();
 
         if (!response.ok) {
           throw new Error("Не удалось загрузить анкету");
         }
 
-        const foundItem = data.items.find(
-          (entry) => entry.id === resolvedParams.id
-        );
-
-        if (!foundItem) {
-          setError("Анкета не найдена");
-          return;
+        setItem(data.item);
+        if (data.item.program) {
+          setProgram(data.item.program);
         }
-
-        setItem(foundItem);
       } catch (err) {
         console.error(err);
         setError("Не удалось загрузить анкету");
@@ -373,6 +415,21 @@ export default function HostSubmissionPage({
                 <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/65">
                   ID: {submissionId}
                 </div>
+              </div>
+            </section>
+
+            <section className="rounded-[28px] border border-white/10 bg-white/5 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.25)] backdrop-blur-xl">
+              <div className="mb-4 inline-flex rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-white/55">
+                анкета клиента
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {Object.entries(item.questionnaire).map(([key, value]) => (
+                  <InfoCard
+                    key={key}
+                    title={QUESTIONNAIRE_LABELS[key] ?? key}
+                    value={typeof value === "string" ? value : String(value)}
+                  />
+                ))}
               </div>
             </section>
 
