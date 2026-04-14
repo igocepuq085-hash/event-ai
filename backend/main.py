@@ -37,10 +37,7 @@ app.add_middleware(
 )
 
 client = OpenAI()
-
-# Для более сильной агентной логики лучше держать полноценную reasoning-модель.
-AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
-TREND_MODEL = os.getenv("OPENAI_TREND_MODEL", "gpt-5")
+AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 
 railway_mount_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
 if railway_mount_path:
@@ -49,68 +46,60 @@ else:
     DATA_DIR = Path("data")
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-
 SUBMISSIONS_FILE = DATA_DIR / "submissions.json"
 
 
 class QuestionnaireSubmission(BaseModel):
-    eventType: str
+    eventType: str  # wedding | jubilee
+
+    # common
     clientName: str
-    secondName: Optional[str] = ""
     phone: str
     eventDate: str
     city: str
-    venue: Optional[str] = ""
+    venue: str
+    startTime: Optional[str] = ""
     guestCount: Optional[str] = ""
-    guestAge: Optional[str] = ""
-    guestComposition: Optional[str] = ""
-
-    eventGoal: Optional[str] = ""
-    desiredAtmosphere: Optional[str] = ""
-    idealImpression: Optional[str] = ""
-    mustHaveMoments: Optional[str] = ""
-    forbiddenTopics: Optional[str] = ""
+    childrenInfo: Optional[str] = ""
+    atmosphere: Optional[str] = ""
     fears: Optional[str] = ""
-
-    mainHeroes: Optional[str] = ""
-    personalityTraits: Optional[str] = ""
-    values: Optional[str] = ""
-    importantStories: Optional[str] = ""
-    internalJokes: Optional[str] = ""
-    safeTopics: Optional[str] = ""
-    tabooTopics: Optional[str] = ""
-
-    hostStyle: Optional[str] = ""
-    humorPreference: Optional[str] = ""
-    tempoPreference: Optional[str] = ""
-    interactionPreference: Optional[str] = ""
-    touchingMoments: Optional[str] = ""
-    modernVsClassic: Optional[str] = ""
-
-    activeGuests: Optional[str] = ""
-    shyGuests: Optional[str] = ""
-    importantGuests: Optional[str] = ""
-    conflictRisks: Optional[str] = ""
-    childrenPresence: Optional[str] = ""
-    whoNotToInvolve: Optional[str] = ""
-
-    musicPreferences: Optional[str] = ""
-    favoriteArtists: Optional[str] = ""
-    bannedMusic: Optional[str] = ""
-    danceBlockNeed: Optional[str] = ""
-    ceremonyNeed: Optional[str] = ""
-    surpriseNeed: Optional[str] = ""
-
-    contestsNo: Optional[str] = ""
-    sensitiveTopics: Optional[str] = ""
-    culturalLimits: Optional[str] = ""
-    logisticsLimits: Optional[str] = ""
-    timingNotes: Optional[str] = ""
-    hardNo: Optional[str] = ""
-
-    finalWishes: Optional[str] = ""
-    additionalDetails: Optional[str] = ""
+    hostWishes: Optional[str] = ""
     references: Optional[str] = ""
+    musicLikes: Optional[str] = ""
+    musicBans: Optional[str] = ""
+
+    # wedding
+    groomName: Optional[str] = ""
+    brideName: Optional[str] = ""
+    weddingTraditions: Optional[str] = ""
+    groomParents: Optional[str] = ""
+    brideParents: Optional[str] = ""
+    grandparents: Optional[str] = ""
+    loveStory: Optional[str] = ""
+    coupleValues: Optional[str] = ""
+    importantDates: Optional[str] = ""
+    proposalStory: Optional[str] = ""
+    nicknames: Optional[str] = ""
+    insideJokes: Optional[str] = ""
+    guestsList: Optional[str] = ""
+    conflictTopics: Optional[str] = ""
+    likedFormats: Optional[str] = ""
+
+    # jubilee
+    celebrantName: Optional[str] = ""
+    celebrantAge: Optional[str] = ""
+    familyMembers: Optional[str] = ""
+    anniversaryAtmosphere: Optional[str] = ""
+    keyMoments: Optional[str] = ""
+    biographyStory: Optional[str] = ""
+    achievements: Optional[str] = ""
+    lifeStages: Optional[str] = ""
+    characterTraits: Optional[str] = ""
+    funnyFacts: Optional[str] = ""
+    importantGuests: Optional[str] = ""
+    jubileeConflictTopics: Optional[str] = ""
+    jubileeLikedFormats: Optional[str] = ""
+    whatCannotBeDone: Optional[str] = ""
 
 
 def load_submissions() -> list:
@@ -133,55 +122,51 @@ def save_submissions(submissions: list) -> None:
 def get_questionnaire_labels() -> dict:
     return {
         "eventType": "Тип мероприятия",
-        "clientName": "Имя клиента",
-        "secondName": "Второй главный герой",
+        "clientName": "Название заявки",
         "phone": "Телефон",
-        "eventDate": "Дата мероприятия",
+        "eventDate": "Дата события",
         "city": "Город",
         "venue": "Площадка",
+        "startTime": "Время начала / сбор гостей",
         "guestCount": "Количество гостей",
-        "guestAge": "Возраст гостей",
-        "guestComposition": "Состав гостей",
-        "eventGoal": "Главная цель мероприятия",
-        "desiredAtmosphere": "Желаемая атмосфера",
-        "idealImpression": "Какое впечатление должно остаться",
-        "mustHaveMoments": "Обязательные моменты",
-        "forbiddenTopics": "Что не должно появиться в программе",
+        "childrenInfo": "Дети",
+        "atmosphere": "Атмосфера",
         "fears": "Страхи и переживания",
-        "mainHeroes": "Главные герои",
-        "personalityTraits": "Черты характера",
-        "values": "Ценности",
-        "importantStories": "Важные истории",
-        "internalJokes": "Внутренние шутки",
-        "safeTopics": "Безопасные темы для юмора",
-        "tabooTopics": "Табу-темы",
-        "hostStyle": "Предпочтительный стиль ведущего",
-        "humorPreference": "Отношение к юмору",
-        "tempoPreference": "Предпочтительный темп",
-        "interactionPreference": "Отношение к интерактивам",
-        "touchingMoments": "Нужны ли трогательные моменты",
-        "modernVsClassic": "Современность или классика",
-        "activeGuests": "Активные гости",
-        "shyGuests": "Скромные гости",
-        "importantGuests": "Важные гости",
-        "conflictRisks": "Риски и конфликтные моменты",
-        "childrenPresence": "Дети на мероприятии",
-        "whoNotToInvolve": "Кого нельзя вовлекать",
-        "musicPreferences": "Музыкальные предпочтения",
-        "favoriteArtists": "Любимые артисты",
-        "bannedMusic": "Нежелательная музыка",
-        "danceBlockNeed": "Нужен ли танцевальный блок",
-        "ceremonyNeed": "Церемонии и официальные блоки",
-        "surpriseNeed": "Сюрпризы",
-        "contestsNo": "Нежелательные конкурсы и приемы",
-        "sensitiveTopics": "Чувствительные темы",
-        "culturalLimits": "Культурные и личные ограничения",
-        "logisticsLimits": "Логистические ограничения",
-        "timingNotes": "Замечания по таймингу",
-        "hardNo": "Жесткое нет",
-        "finalWishes": "Финальные пожелания",
-        "additionalDetails": "Дополнительные детали",
+        "hostWishes": "Пожелания к ведущему",
         "references": "Референсы и ориентиры",
+        "musicLikes": "Любимая музыка",
+        "musicBans": "Что нельзя включать",
+
+        "groomName": "Имя жениха",
+        "brideName": "Имя невесты",
+        "weddingTraditions": "Свадебные традиции",
+        "groomParents": "Родители жениха",
+        "brideParents": "Родители невесты",
+        "grandparents": "Бабушки и дедушки",
+        "loveStory": "История знакомства",
+        "coupleValues": "Ценности пары",
+        "importantDates": "Важные даты и события",
+        "proposalStory": "История предложения",
+        "nicknames": "Ласковые имена",
+        "insideJokes": "Внутренние шутки",
+        "guestsList": "Список гостей и описания",
+        "conflictTopics": "Конфликтные темы или чувствительные фигуры",
+        "likedFormats": "Нравящиеся конкурсы / форматы",
+
+        "celebrantName": "Имя юбиляра",
+        "celebrantAge": "Возраст юбиляра",
+        "familyMembers": "Семья юбиляра",
+        "anniversaryAtmosphere": "Атмосфера юбилея",
+        "keyMoments": "Обязательные моменты юбилея",
+        "biographyStory": "История юбиляра",
+        "achievements": "Достижения и чем гордятся",
+        "lifeStages": "Важные этапы жизни",
+        "characterTraits": "Характер и особенности юбиляра",
+        "funnyFacts": "Смешные факты / любимые фразы",
+        "importantGuests": "Важные гости",
+        "jubileeConflictTopics": "Чувствительные темы на юбилее",
+        "jubileeLikedFormats": "Нравящиеся форматы на юбилее",
+        "whatCannotBeDone": "Чего нельзя делать на юбилее",
     }
 
 
@@ -204,428 +189,77 @@ def try_parse_json(content: str) -> dict:
         start = content.find("{")
         end = content.rfind("}")
         if start != -1 and end != -1 and end > start:
-            cleaned = content[start : end + 1]
+            cleaned = content[start:end + 1]
             return json.loads(cleaned)
         raise
-
-
-def call_model_json(
-    system_prompt: str,
-    user_prompt: str,
-    *,
-    model: Optional[str] = None,
-    enable_web_search: bool = False,
-) -> dict:
-    kwargs = {
-        "model": model or AI_MODEL,
-        "input": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    }
-
-    # Web search в Responses API включается через tools.
-    if enable_web_search:
-        kwargs["tools"] = [{"type": "web_search"}]
-
-    response = client.responses.create(**kwargs)
-    return try_parse_json(response.output_text)
-
-
-def get_current_event_trends(event_type: str, questionnaire_context: str) -> dict:
-    today_str = datetime.now().strftime("%Y-%m-%d")
-
-    trend_system = """
-Ты — тренд-аналитик event-индустрии.
-Твоя задача: через web search собрать только актуальные, реально полезные тренды на текущую дату для конкретного типа мероприятия.
-
-Правила:
-- обязательно используй web search
-- работай только с актуальными трендами на сегодня
-- не тащи случайные идеи, которые невозможно применить ведущему на практике
-- особенно смотри:
-  1. тренды по свадебной/корпоративной/event-драматургии
-  2. тренды по вовлечению гостей
-  3. тренды по тону ведения и стилю речи
-  4. тренды по музыкальным решениям и DJ-логике
-  5. что уже считается устаревшим
-- вывод нужен без ссылок и без цитат внутри JSON
-- нужен прикладной, рабочий результат для ведущего мероприятий
-
-Верни строго JSON:
-{
-  "trend_summary": "",
-  "current_trends": [],
-  "outdated_patterns_to_avoid": [],
-  "guest_engagement_trends": [],
-  "music_and_dj_trends": [],
-  "script_style_trends": [],
-  "how_to_apply_to_this_case": []
-}
-"""
-
-    trend_user = f"""
-Текущая дата: {today_str}
-Тип мероприятия: {event_type}
-
-Контекст анкеты:
-{questionnaire_context}
-
-Нужны тренды именно на текущую дату и именно в прикладной event-логике.
-Верни только JSON.
-"""
-
-    return call_model_json(
-        trend_system,
-        trend_user,
-        model=TREND_MODEL,
-        enable_web_search=True,
-    )
 
 
 def generate_agent_program(questionnaire: dict) -> dict:
     context = build_questionnaire_context(questionnaire)
     event_type = questionnaire.get("eventType", "").strip().lower()
 
-    # 1. Аналитик
-    analyst_system = """
-Ты — аналитик event-проекта.
-Твоя задача: на основе анкеты вытащить только полезные факты для построения реального сценария.
+    system_prompt = """
+Ты — сильный event-стратег, сценарист ведущих, режиссер мероприятий и редактор финального документа.
+Работаешь только с двумя типами мероприятий:
+- wedding
+- jubilee
 
-Правила:
-- не пиши обзор
-- не пиши воду
-- только факты, ограничения, риски, эмоциональные опоры, материалы для речи ведущего
-- если есть тайминговый якорь вроде "торт в 22:00", обязательно выделяй его как базу для построения расчетного сценария
-- обязательно выделяй особенности именно для данного типа мероприятия: свадьба, корпоратив, день рождения, частный праздник
+Твоя задача: на основе анкеты сразу собрать ГОТОВЫЙ рабочий документ ведущего.
 
-Верни строго JSON:
-{
-  "event_profile": {
-    "event_type": "",
-    "format_name": "",
-    "city": "",
-    "venue": "",
-    "event_date": "",
-    "main_goal": "",
-    "desired_atmosphere": "",
-    "preferred_host_style": "",
-    "tempo": "",
-    "interaction_mode": "",
-    "modern_vs_classic": ""
-  },
-  "hard_requirements": [],
-  "hard_bans": [],
-  "mandatory_moments": [],
-  "timing_anchors": [],
-  "story_material": {
-    "core_story": "",
-    "personal_details": [],
-    "emotional_points": [],
-    "usable_safe_jokes": [],
-    "taboo_topics": []
-  },
-  "audience": {
-    "core_audience": "",
-    "active_guests": [],
-    "shy_guests": [],
-    "important_guests": [],
-    "do_not_involve": [],
-    "children_notes": ""
-  },
-  "music": {
-    "preferences": "",
-    "favorite_artists": [],
-    "banned_music": [],
-    "dance_blocks_requested": ""
-  },
-  "risk_map": [
-    {
-      "risk": "",
-      "why": ""
-    }
-  ],
-  "missing_but_inferable": {
-    "start_time_assumption": "",
-    "timeline_strategy": ""
-  }
-}
-"""
+Это не обзор анкеты.
+Это не список советов.
+Это не черновые заметки.
 
-    analyst_user = f"""
-Вот анкета клиента:
-
-{context}
-
-Верни только JSON.
-"""
-    analyst_result = call_model_json(analyst_system, analyst_user)
-
-    # 2. Тренды через web search
-    trend_result = get_current_event_trends(event_type, context)
-
-    # 3. Сценарист
-    writer_system = """
-Ты — сильный сценарист мероприятий.
-Твоя задача: построить первый подробный сценарный черновик на основе анкеты, аналитики и актуальных трендов.
-
-Главный приоритет:
-- это уже почти готовый рабочий сценарий
-- он должен быть по типу мероприятия: свадьба отдельно, корпоратив отдельно, остальные события отдельно
-- тайминг должен быть расчетным и практичным
-- каждый блок должен содержать полноценную режиссерскую логику
-- текст ведущего должен быть развернутым
-- стиль ведущего должен быть ОБРАЗНЫМ, МЕТАФОРИЧНЫМ, чуть художественным
-- допустимо даже чуть переборщить с метафорами, если текст остается произносимым и красивым
+Это должен быть готовый продукт для работы ведущего.
 
 Критические требования:
-- если у блока ведущий должен говорить 3-5 минут, текст должен быть действительно длинным, как реальная речь
-- host_text внутри таймлайна пиши полноценным, пригодным для чтения и адаптации
-- ведущий должен не только комментировать, а управлять залом словом
-- в речи должно быть больше образов, сравнений, атмосферных формул
-- учитывай актуальные тренды на текущую дату
-- dj_task не должен быть общим: пиши конкретно, что включать, как заходить, что делать по динамике
-- отделяй работу ведущего, диджея и зала
-- каждый блок должен ощущаться режиссерски
+- только один цельный сильный результат
+- никакой воды
+- никакой банальности
+- никакой пустой красивости
+- текст должен быть полезен в реальном зале
+- стиль ведущего должен быть образным, метафоричным, живым
+- можно немного переборщить с метафорами, если речь звучит красиво и сценично
+- ведущий должен не комментировать, а вести зал словом
+- ключевые блоки должны содержать длинный, пригодный для чтения текст
+- если блок предполагает речь 3–5 минут, текст должен быть действительно длинным
+- музыка должна быть описана конкретно
+- диджей должен получить не абстракцию, а понятные треки, связки, логику заходов и стоп-лист
+- wedding и jubilee должны ощущаться абсолютно по-разному
+- нужно встроить современные подходы к ведению: персональность, режиссура, мягкое вовлечение, отказ от кринжовых форматов, музыкальная драматургия, ритмические волны
+- НЕ упоминай поиск трендов, интернет или источники
+- просто используй современную event-логику как часть финального решения
 
-Для свадьбы особенно важно:
-- драматургия семьи
-- история пары
-- ритуалы
-- пики эмоций
-- танцевальные волны
-- красивый финал
+Что обязательно сделать:
+1. выделить паспорт события
+2. собрать ключевые команды ведущему
+3. собрать вопросы, которые нужно уточнить до мероприятия, если данных не хватает
+4. построить режиссерскую логику вечера
+5. построить ПОШАГОВЫЙ ТАЙМИНГ
+6. на каждый блок дать:
+   - цель
+   - что происходит
+   - действие ведущего
+   - длинный текст ведущего
+   - задачу диджея
+   - режиссерский ход
+   - контроль риска
+   - переход
+7. дать отдельный блок текстов ведущего
+8. дать отдельный блок рекомендаций диджею
+9. дать работу с гостями
+10. дать риски
+11. дать план Б
+12. дать краткую версию для печати
 
-Верни строго JSON:
-{
-  "concept": {
-    "big_idea": "",
-    "tone": "",
-    "main_emotional_result": "",
-    "why_this_event_will_be_memorable": ""
-  },
-  "director_axis": {
-    "wave_1": "",
-    "wave_2": "",
-    "wave_3": "",
-    "wave_4": ""
-  },
-  "scenario_timeline": [
-    {
-      "time_from": "",
-      "time_to": "",
-      "block_title": "",
-      "block_purpose": "",
-      "what_happens": "",
-      "host_action": "",
-      "host_text": "",
-      "dj_task": "",
-      "director_move": "",
-      "risk_control": "",
-      "transition": ""
-    }
-  ],
-  "host_script": {
-    "opening_main": "",
-    "opening_short": "",
-    "welcome_line": "",
-    "first_toast_intro": "",
-    "first_dance_intro": "",
-    "family_block_intro": "",
-    "surprise_intro": "",
-    "dance_block_intro": "",
-    "cake_intro": "",
-    "closing_words": ""
-  },
-  "dj_guidance": {
-    "overall_music_policy": "",
-    "welcome_music": "",
-    "opening_music": "",
-    "table_background": "",
-    "emotional_blocks_music": "",
-    "dance_block_1": "",
-    "dance_block_2": "",
-    "dance_block_3": "",
-    "cake_music": "",
-    "final_music": "",
-    "stop_list": [],
-    "technical_notes": []
-  }
-}
-"""
-
-    writer_user = f"""
-Тип мероприятия: {event_type}
-
-Анкета клиента:
-{context}
-
-Аналитика:
-{json.dumps(analyst_result, ensure_ascii=False, indent=2)}
-
-Актуальные тренды:
-{json.dumps(trend_result, ensure_ascii=False, indent=2)}
-
-Верни только JSON.
-"""
-    writer_result = call_model_json(writer_system, writer_user)
-
-    # 4. Режиссер
-    director_system = """
-Ты — режиссер события.
-Твоя задача: критично проверить сценарный черновик с точки зрения постановки, ритма, кульминаций и сценической логики.
-
-Правила:
-- ищи слабые места
-- отмечай провалы ритма
-- отмечай слабые переходы
-- отмечай недостаток режиссерских ходов
-- отмечай, где ведущему не хватает действия или дыхания сцены
-- особенно проверяй, не слишком ли короткие тексты ведущего
-- особенно проверяй, достаточно ли музыкально конкретны задачи диджея
-- если тексты короткие и не тянут на реальную речь, считай это серьезным недостатком
-- проверь, интегрированы ли актуальные тренды, а не просто перечислены
-
-Верни строго JSON:
-{
-  "verdict": "",
-  "strengths": [],
-  "weaknesses": [],
-  "timeline_fixes": [],
-  "direction_fixes": [],
-  "dj_fixes": [],
-  "host_text_fixes": [],
-  "trend_integration_fixes": [],
-  "must_improve_before_final": []
-}
-"""
-
-    director_user = f"""
-Анкета:
-{context}
-
-Аналитика:
-{json.dumps(analyst_result, ensure_ascii=False, indent=2)}
-
-Тренды:
-{json.dumps(trend_result, ensure_ascii=False, indent=2)}
-
-Черновик сценариста:
-{json.dumps(writer_result, ensure_ascii=False, indent=2)}
-
-Верни только JSON.
-"""
-    director_result = call_model_json(director_system, director_user)
-
-    # 5. Критик
-    critic_system = """
-Ты — жесткий, но профессиональный критик event-продукта.
-Твоя задача: проверить, действительно ли сценарий полезен ведущему в работе.
-
-Ищи:
-- банальности
-- пустые места
-- советы вместо продукта
-- слабый юмор
-- плохую конкретику
-- отсутствие пошагового действия
-- слабую работу для диджея
-- короткие тексты, которые нельзя реально читать в зале
-- слишком общий плейлист без трековой конкретики
-- слабую режиссуру
-- невыразительный финал
-- недостаток образности и авторского стиля ведущего
-- если метафоры слабы — укажи это
-- если тренды не встроены в сценарий — укажи это
-
-Верни строго JSON:
-{
-  "verdict": "",
-  "what_is_too_generic": [],
-  "what_is_not_practical_enough": [],
-  "what_is_weak_for_host": [],
-  "what_is_weak_for_dj": [],
-  "what_is_weak_in_style": [],
-  "what_is_risky": [],
-  "must_fix_now": [],
-  "final_readiness_score": 0
-}
-"""
-
-    critic_user = f"""
-Анкета:
-{context}
-
-Аналитика:
-{json.dumps(analyst_result, ensure_ascii=False, indent=2)}
-
-Тренды:
-{json.dumps(trend_result, ensure_ascii=False, indent=2)}
-
-Черновик сценариста:
-{json.dumps(writer_result, ensure_ascii=False, indent=2)}
-
-Замечания режиссера:
-{json.dumps(director_result, ensure_ascii=False, indent=2)}
-
-Верни только JSON.
-"""
-    critic_result = call_model_json(critic_system, critic_user)
-
-    # 6. Финальная сборка
-    final_system = """
-Ты — главный редактор итогового сценария мероприятия.
-Твоя задача: собрать финальную, готовую к работе программу для ведущего.
-
-Ты должен взять:
-- анкету клиента
-- аналитику
-- актуальные тренды текущей даты
-- черновик сценариста
-- правки режиссера
-- замечания критика
-
-И выдать ГОТОВЫЙ ПРОДУКТ:
-- не обзор
-- не советы
-- не методичку
-- а реальный рабочий сценарий мероприятия
-
-Это очень важно:
-- результат должен быть пригоден для реальной работы ведущего
-- блоки должны идти как пошаговое действие
-- тайминг должен быть расчетным и практичным
-- тексты ведущего должны быть длинными и читаемыми
-- если речь в блоке ощущается как 3–5 минут, напиши длинный текст
-- стиль ведущего должен быть метафорическим, образным, живым
-- можно чуть переборщить с метафорами, но речь должна оставаться произносимой
-- рекомендации диджею должны быть конкретными, с трековой логикой, примерами треков и связок
-- свадьбы, корпоративы и другие мероприятия должны ощущаться по-разному
-- тренды текущей даты должны быть не отдельной болтовней, а встроенной логикой сценария
-- внутренние роли сценарист, режиссер и критик уже договорились между собой — в финале нужен только сильный итог
-
-Формат работы с музыкой:
-- допустимо рекомендовать конкретные известные треки и артистов как ориентиры
-- для каждого музыкального блока пиши не только настроение, но и примеры 5-10 треков/ориентиров или трековых связок
-- стоп-лист должен быть конкретным
-- технические заметки должны быть прикладными
-
-Формат работы с речью ведущего:
-- opening_main и closing_words должны быть длиннее обычного
-- host_text в сценарных блоках должен быть действительно полезным
-- допускается писать вариативно, но текст должен быть плотным
-- не надо бояться длины, если длина делает документ рабочим
-- в речи должны быть: образ, метафора, интонационный рисунок, смена температуры
-
-Правила качества:
-- никаких пустых общих фраз
-- юмор только безопасный
-- все должно быть применимо на площадке
-- нельзя повторять грубые формулировки клиента буквально, если это небезопасно
-- если нет точного времени старта, но есть якорь, построй реалистичную расчетную сетку и укажи, что это рабочий расчет
-- не делай все блоки одинаковыми по объему: ключевые блоки должны быть развернуты сильнее
-- добавь отдельный блок с ключевыми командами ведущему
-- добавь отдельный блок с тем, что нужно уточнить у клиента до мероприятия, если в анкете есть пробелы
+Правила безопасности и качества:
+- нельзя использовать унизительные конкурсы
+- нельзя предлагать рискованный или токсичный юмор
+- нельзя повторять грубые формулировки клиента буквально, если они звучат опасно или обидно
+- если нет времени старта, строй разумный рабочий расчет и честно это укажи
+- если данных не хватает, не срывай сценарий, а строй лучший рабочий вариант и отдельно выноси уточнения
+- не делай все блоки одинаковыми по длине
+- самые важные блоки делай сильнее и длиннее
 
 Верни строго JSON:
 {
@@ -688,12 +322,11 @@ def generate_agent_program(questionnaire: dict) -> dict:
     "opening_main": "",
     "opening_short": "",
     "welcome_line": "",
-    "first_toast_intro": "",
-    "first_dance_intro": "",
+    "first_core_intro": "",
     "family_block_intro": "",
     "surprise_intro": "",
     "dance_block_intro": "",
-    "cake_intro": "",
+    "final_block_intro": "",
     "closing_words": ""
   },
   "dj_guidance": {
@@ -705,7 +338,7 @@ def generate_agent_program(questionnaire: dict) -> dict:
     "dance_block_1": "",
     "dance_block_2": "",
     "dance_block_3": "",
-    "cake_music": "",
+    "final_block_music": "",
     "final_music": "",
     "stop_list": [],
     "technical_notes": []
@@ -744,33 +377,24 @@ def generate_agent_program(questionnaire: dict) -> dict:
 }
 """
 
-    final_user = f"""
+    user_prompt = f"""
 Тип мероприятия: {event_type}
 
 Анкета:
 {context}
 
-Аналитика:
-{json.dumps(analyst_result, ensure_ascii=False, indent=2)}
-
-Актуальные тренды:
-{json.dumps(trend_result, ensure_ascii=False, indent=2)}
-
-Черновик сценариста:
-{json.dumps(writer_result, ensure_ascii=False, indent=2)}
-
-Правки режиссера:
-{json.dumps(director_result, ensure_ascii=False, indent=2)}
-
-Замечания критика:
-{json.dumps(critic_result, ensure_ascii=False, indent=2)}
-
 Собери финальный рабочий сценарий.
 Верни только JSON.
 """
-    final_result = call_model_json(final_system, final_user)
 
-    return final_result
+    response = client.responses.create(
+        model=AI_MODEL,
+        input=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+    return try_parse_json(response.output_text)
 
 
 def safe_filename(value: str) -> str:
@@ -832,8 +456,8 @@ def build_docx(submission: dict, program: dict) -> BytesIO:
 
     add_heading(document, "1. Анкета клиента", level=1)
     for key, label in labels.items():
-        value = questionnaire.get(key, "")
-        add_label_value(document, label, value)
+      արժեք = questionnaire.get(key, "")
+      add_label_value(document, label, արժեք)
 
     add_heading(document, "2. Готовый сценарий ведущего", level=1)
 
@@ -871,17 +495,17 @@ def build_docx(submission: dict, program: dict) -> BytesIO:
     add_label_value(document, "Почему вечер запомнится", concept.get("why_this_event_will_be_remembered", ""))
 
     trend_layer = program.get("trend_layer", {})
-    add_heading(document, "2.4. Актуальные тренды, встроенные в сценарий", level=2)
+    add_heading(document, "2.4. Современная логика сценария", level=2)
     add_label_value(document, "Краткое резюме", trend_layer.get("trend_summary", ""))
     document.add_paragraph("Что применено:")
     add_list(document, trend_layer.get("applied_trends", []))
-    document.add_paragraph("Что сознательно отброшено как устаревшее:")
+    document.add_paragraph("Что отброшено как устаревшее:")
     add_list(document, trend_layer.get("rejected_outdated_patterns", []))
 
     add_heading(document, "2.5. Ключевые команды ведущему", level=2)
     add_list(document, program.get("key_host_commands", []))
 
-    add_heading(document, "2.6. Что уточнить у клиента до мероприятия", level=2)
+    add_heading(document, "2.6. Что уточнить до мероприятия", level=2)
     add_list(document, program.get("questions_to_clarify_before_event", []))
 
     director_logic = program.get("director_logic", {})
@@ -910,12 +534,11 @@ def build_docx(submission: dict, program: dict) -> BytesIO:
     add_label_value(document, "Основное открытие", host_script.get("opening_main", ""))
     add_label_value(document, "Короткое открытие", host_script.get("opening_short", ""))
     add_label_value(document, "Welcome-фраза", host_script.get("welcome_line", ""))
-    add_label_value(document, "Подводка к первому тосту", host_script.get("first_toast_intro", ""))
-    add_label_value(document, "Подводка к первому танцу", host_script.get("first_dance_intro", ""))
+    add_label_value(document, "Подводка к первому ключевому блоку", host_script.get("first_core_intro", ""))
     add_label_value(document, "Подводка к семейному блоку", host_script.get("family_block_intro", ""))
     add_label_value(document, "Подводка к сюрпризу", host_script.get("surprise_intro", ""))
     add_label_value(document, "Подводка к танцевальному блоку", host_script.get("dance_block_intro", ""))
-    add_label_value(document, "Подводка к торту", host_script.get("cake_intro", ""))
+    add_label_value(document, "Подводка к финальному блоку", host_script.get("final_block_intro", ""))
     add_label_value(document, "Финальные слова", host_script.get("closing_words", ""))
 
     dj_guidance = program.get("dj_guidance", {})
@@ -928,7 +551,7 @@ def build_docx(submission: dict, program: dict) -> BytesIO:
     add_label_value(document, "Танцевальный блок 1", dj_guidance.get("dance_block_1", ""))
     add_label_value(document, "Танцевальный блок 2", dj_guidance.get("dance_block_2", ""))
     add_label_value(document, "Танцевальный блок 3", dj_guidance.get("dance_block_3", ""))
-    add_label_value(document, "Музыка на торт", dj_guidance.get("cake_music", ""))
+    add_label_value(document, "Музыка на финальный блок", dj_guidance.get("final_block_music", ""))
     add_label_value(document, "Финальная музыка", dj_guidance.get("final_music", ""))
     document.add_paragraph("Стоп-лист:")
     add_list(document, dj_guidance.get("stop_list", []))
@@ -991,7 +614,7 @@ def root():
         "data_path": str(SUBMISSIONS_FILE),
         "using_railway_volume": bool(railway_mount_path),
         "model": AI_MODEL,
-        "trend_model": TREND_MODEL,
+        "supported_event_types": ["wedding", "jubilee"],
     }
 
 
@@ -1012,6 +635,9 @@ def get_submissions():
 
 @app.post("/api/questionnaire")
 def submit_questionnaire(payload: QuestionnaireSubmission):
+    if payload.eventType not in ["wedding", "jubilee"]:
+        raise HTTPException(status_code=400, detail="Поддерживаются только wedding и jubilee")
+
     submission_data = payload.model_dump()
 
     record = {
