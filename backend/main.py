@@ -5,10 +5,10 @@ from pydantic import BaseModel
 from typing import Optional
 from pathlib import Path
 from io import BytesIO
+from datetime import datetime
 import json
 import os
 import re
-from datetime import datetime
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -37,6 +37,7 @@ app.add_middleware(
 )
 
 client = OpenAI()
+AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 
 railway_mount_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
 if railway_mount_path:
@@ -126,69 +127,6 @@ def save_submissions(submissions: list) -> None:
         json.dump(submissions, file, ensure_ascii=False, indent=2)
 
 
-def build_questionnaire_context(questionnaire: dict) -> str:
-    labels = {
-        "eventType": "Тип мероприятия",
-        "clientName": "Имя клиента",
-        "secondName": "Второй главный герой",
-        "phone": "Телефон",
-        "eventDate": "Дата мероприятия",
-        "city": "Город",
-        "venue": "Площадка",
-        "guestCount": "Количество гостей",
-        "guestAge": "Возраст гостей",
-        "guestComposition": "Состав гостей",
-        "eventGoal": "Главная цель мероприятия",
-        "desiredAtmosphere": "Желаемая атмосфера",
-        "idealImpression": "Какое впечатление должно остаться",
-        "mustHaveMoments": "Обязательные моменты",
-        "forbiddenTopics": "Что не должно появиться в программе",
-        "fears": "Страхи и переживания",
-        "mainHeroes": "Главные герои",
-        "personalityTraits": "Черты характера",
-        "values": "Ценности",
-        "importantStories": "Важные истории",
-        "internalJokes": "Внутренние шутки",
-        "safeTopics": "Безопасные темы для юмора",
-        "tabooTopics": "Табу-темы",
-        "hostStyle": "Предпочтительный стиль ведущего",
-        "humorPreference": "Отношение к юмору",
-        "tempoPreference": "Предпочтительный темп",
-        "interactionPreference": "Отношение к интерактивам",
-        "touchingMoments": "Нужны ли трогательные моменты",
-        "modernVsClassic": "Современность или классика",
-        "activeGuests": "Активные гости",
-        "shyGuests": "Скромные гости",
-        "importantGuests": "Важные гости",
-        "conflictRisks": "Риски и конфликтные моменты",
-        "childrenPresence": "Дети на мероприятии",
-        "whoNotToInvolve": "Кого нельзя вовлекать",
-        "musicPreferences": "Музыкальные предпочтения",
-        "favoriteArtists": "Любимые артисты",
-        "bannedMusic": "Нежелательная музыка",
-        "danceBlockNeed": "Нужен ли танцевальный блок",
-        "ceremonyNeed": "Церемонии и официальные блоки",
-        "surpriseNeed": "Сюрпризы",
-        "contestsNo": "Нежелательные конкурсы и приемы",
-        "sensitiveTopics": "Чувствительные темы",
-        "culturalLimits": "Культурные и личные ограничения",
-        "logisticsLimits": "Логистические ограничения",
-        "timingNotes": "Замечания по таймингу",
-        "hardNo": "Жесткое нет",
-        "finalWishes": "Финальные пожелания",
-        "additionalDetails": "Дополнительные детали",
-        "references": "Референсы и ориентиры",
-    }
-
-    lines = []
-    for key, value in questionnaire.items():
-        if isinstance(value, str) and value.strip():
-            label = labels.get(key, key)
-            lines.append(f"{label}: {value.strip()}")
-
-    return "\n".join(lines)
-
-
 def get_questionnaire_labels() -> dict:
     return {
         "eventType": "Тип мероприятия",
@@ -244,6 +182,18 @@ def get_questionnaire_labels() -> dict:
     }
 
 
+def build_questionnaire_context(questionnaire: dict) -> str:
+    labels = get_questionnaire_labels()
+    lines = []
+
+    for key, value in questionnaire.items():
+        if isinstance(value, str) and value.strip():
+            label = labels.get(key, key)
+            lines.append(f"{label}: {value.strip()}")
+
+    return "\n".join(lines)
+
+
 def try_parse_json(content: str) -> dict:
     try:
         return json.loads(content)
@@ -251,142 +201,440 @@ def try_parse_json(content: str) -> dict:
         start = content.find("{")
         end = content.rfind("}")
         if start != -1 and end != -1 and end > start:
-            cleaned = content[start:end + 1]
+            cleaned = content[start : end + 1]
             return json.loads(cleaned)
         raise
 
 
-def generate_ai_program(questionnaire: dict) -> dict:
-    context = build_questionnaire_context(questionnaire)
-
-    system_prompt = """
-Ты — профессиональный сценарист, режиссер мероприятия и помощник ведущего.
-Работаешь только на русском языке.
-Ты создаешь не обзор анкеты, а рабочий документ для ведущего.
-
-Главные принципы:
-- не пересказывай анкету
-- не делай статистику ответов
-- не пиши воду
-- не пиши слишком общие советы
-- не делай шаблонный текст
-- не предлагай пошлые, унизительные или устаревшие конкурсы
-- не используй рискованный юмор
-- если информации мало, строй аккуратные и безопасные решения
-
-Ответ возвращай строго в JSON по структуре:
-{
-  "event_brief": {
-    "format": "",
-    "city": "",
-    "venue": "",
-    "date": "",
-    "atmosphere": "",
-    "main_goal": "",
-    "key_moments": [],
-    "hard_limits": [],
-    "timing_anchor": ""
-  },
-  "director_concept": {
-    "idea": "",
-    "emotional_arc": "",
-    "host_role": "",
-    "main_impression_for_guests": ""
-  },
-  "red_flags": [
-    {
-      "risk": "",
-      "why_it_matters": "",
-      "how_to_handle": ""
-    }
-  ],
-  "audience_map": {
-    "core_audience": "",
-    "active_guests": [],
-    "shy_guests": [],
-    "important_guests": [],
-    "guests_not_to_involve": [],
-    "children_notes": ""
-  },
-  "timeline_plan": [
-    {
-      "block_title": "",
-      "block_goal": "",
-      "approx_duration": "",
-      "what_happens": "",
-      "host_task": "",
-      "transition_to_next": ""
-    }
-  ],
-  "host_lines": {
-    "opening_main": "",
-    "opening_short": "",
-    "intro_first_dance": "",
-    "intro_family_block": "",
-    "intro_surprise_block": "",
-    "intro_cake": "",
-    "closing_lines": ""
-  },
-  "interactive_blocks": [
-    {
-      "title": "",
-      "goal": "",
-      "best_moment": "",
-      "how_to_run": "",
-      "why_it_is_safe": ""
-    }
-  ],
-  "humor_bank": [
-    {
-      "line": "",
-      "tone": "",
-      "where_to_use": "",
-      "safety_note": ""
-    }
-  ],
-  "plan_b": [
-    {
-      "situation": "",
-      "response": ""
-    }
-  ],
-  "final_strategy": {
-    "how_to_lead_this_event": "",
-    "what_to_avoid": "",
-    "what_will_make_this_event_strong": ""
-  },
-  "print_version": {
-    "title": "",
-    "event_summary": "",
-    "key_people": [],
-    "must_do_blocks": [],
-    "do_not_do": [],
-    "short_timeline": [],
-    "host_focus_points": []
-  }
-}
-"""
-
-    user_prompt = f"""
-Ниже анкета клиента.
-Преврати ее в рабочий документ для ведущего, а не в обзор ответов.
-
-Вот анкета клиента:
-
-{context}
-
-Ответ только в JSON.
-"""
-
+def call_model_json(system_prompt: str, user_prompt: str) -> dict:
     response = client.responses.create(
-        model="gpt-5.4-mini",
+        model=AI_MODEL,
         input=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
     )
-
     return try_parse_json(response.output_text)
+
+
+def generate_agent_program(questionnaire: dict) -> dict:
+    context = build_questionnaire_context(questionnaire)
+    event_type = questionnaire.get("eventType", "").strip().lower()
+
+    # 1. Аналитик извлекает базу
+    analyst_system = """
+Ты — аналитик event-проекта.
+Твоя задача: на основе анкеты вытащить только полезные факты для построения реального сценария.
+
+Правила:
+- не пиши обзор
+- не пиши воду
+- не делай красивых общих фраз
+- только факты, ограничения, риски, эмоциональные опоры, материалы для речи ведущего
+- если в анкете нет точного времени начала вечера, но есть якорь вроде "торт в 22:00", это нужно отметить как главный якорь для будущего расчетного тайминга
+
+Верни строго JSON:
+{
+  "event_profile": {
+    "event_type": "",
+    "format_name": "",
+    "city": "",
+    "venue": "",
+    "event_date": "",
+    "main_goal": "",
+    "desired_atmosphere": "",
+    "preferred_host_style": "",
+    "tempo": "",
+    "interaction_mode": "",
+    "modern_vs_classic": ""
+  },
+  "hard_requirements": [],
+  "hard_bans": [],
+  "mandatory_moments": [],
+  "timing_anchors": [],
+  "story_material": {
+    "core_story": "",
+    "personal_details": [],
+    "emotional_points": [],
+    "usable_safe_jokes": [],
+    "taboo_topics": []
+  },
+  "audience": {
+    "core_audience": "",
+    "active_guests": [],
+    "shy_guests": [],
+    "important_guests": [],
+    "do_not_involve": [],
+    "children_notes": ""
+  },
+  "music": {
+    "preferences": "",
+    "favorite_artists": [],
+    "banned_music": [],
+    "dance_blocks_requested": ""
+  },
+  "risk_map": [
+    {
+      "risk": "",
+      "why": ""
+    }
+  ],
+  "missing_but_inferable": {
+    "start_time_assumption": "",
+    "timeline_strategy": ""
+  }
+}
+"""
+
+    analyst_user = f"""
+Вот анкета клиента:
+
+{context}
+
+Верни только JSON.
+"""
+    analyst_result = call_model_json(analyst_system, analyst_user)
+
+    # 2. Сценарист строит черновой сценарий
+    writer_system = """
+Ты — сильный сценарист мероприятий.
+Твоя задача: построить первый подробный сценарный черновик на основе анкеты и аналитики.
+
+Требования:
+- это должен быть не обзор, а реальный каркас сценария
+- используй формат мероприятия: wedding, corporate, birthday, anniversary, private
+- разделяй подход по типу мероприятия
+- если это свадьба — делай свадебную драматургию, семейные оси, ритуалы, музыкальные волны
+- если корпоратив — делай блоки под компанию, руководство, команду, награждения и энергию зала
+- если иное событие — адаптируй под тип
+
+Самое важное:
+- нужен РАСЧЕТНЫЙ ТАЙМИНГ по времени
+- даже если в анкете нет времени старта, но есть "торт в 22:00" или другой якорь, построй реалистичный тайминг назад от этой точки
+- тайминг должен быть практичным для ведущего
+- каждый блок должен содержать цель, действия ведущего, текст ведущего, работу диджея, риск-контроль и переход
+
+Верни строго JSON:
+{
+  "concept": {
+    "big_idea": "",
+    "tone": "",
+    "main_emotional_result": "",
+    "why_this_event_will_be_memorable": ""
+  },
+  "director_axis": {
+    "wave_1": "",
+    "wave_2": "",
+    "wave_3": "",
+    "wave_4": ""
+  },
+  "scenario_timeline": [
+    {
+      "time_from": "",
+      "time_to": "",
+      "block_title": "",
+      "block_purpose": "",
+      "what_happens": "",
+      "host_action": "",
+      "host_text": "",
+      "dj_task": "",
+      "director_move": "",
+      "risk_control": "",
+      "transition": ""
+    }
+  ],
+  "host_script": {
+    "opening_main": "",
+    "opening_short": "",
+    "first_transition": "",
+    "family_block_intro": "",
+    "dance_block_intro": "",
+    "surprise_intro": "",
+    "cake_intro": "",
+    "final_words": ""
+  },
+  "dj_guidance": {
+    "overall_music_policy": "",
+    "welcome_music": "",
+    "opening_music": "",
+    "emotional_blocks_music": "",
+    "dance_block_1": "",
+    "dance_block_2": "",
+    "dance_block_3": "",
+    "cake_music": "",
+    "stop_list": []
+  }
+}
+"""
+
+    writer_user = f"""
+Тип мероприятия: {event_type}
+
+Анкета клиента:
+{context}
+
+Аналитика:
+{json.dumps(analyst_result, ensure_ascii=False, indent=2)}
+
+Верни только JSON.
+"""
+    writer_result = call_model_json(writer_system, writer_user)
+
+    # 3. Режиссер проверяет постановку
+    director_system = """
+Ты — режиссер события.
+Твоя задача: критично проверить сценарный черновик с точки зрения постановки, ритма, кульминаций и сценической логики.
+
+Правила:
+- не пересказывай анкету
+- ищи слабые места
+- отмечай провалы ритма
+- отмечай слабые переходы
+- отмечай недостаток режиссерских ходов
+- отмечай, где ведущему не хватает конкретных действий
+- предложи конкретные улучшения, а не общие слова
+
+Верни строго JSON:
+{
+  "verdict": "",
+  "strengths": [],
+  "weaknesses": [],
+  "timeline_fixes": [],
+  "direction_fixes": [],
+  "dj_fixes": [],
+  "host_text_fixes": [],
+  "must_improve_before_final": []
+}
+"""
+
+    director_user = f"""
+Анкета:
+{context}
+
+Аналитика:
+{json.dumps(analyst_result, ensure_ascii=False, indent=2)}
+
+Черновик сценариста:
+{json.dumps(writer_result, ensure_ascii=False, indent=2)}
+
+Верни только JSON.
+"""
+    director_result = call_model_json(director_system, director_user)
+
+    # 4. Критик ломает слабые решения
+    critic_system = """
+Ты — жесткий, но профессиональный критик event-продукта.
+Твоя задача: проверить, действительно ли сценарий полезен ведущему в работе.
+
+Ищи:
+- банальности
+- пустые места
+- советы вместо продукта
+- слабый юмор
+- плохую конкретику
+- отсутствие пошагового действия
+- слабое разделение по ролям ведущий/диджей/зал
+- недожатую режиссуру
+- невыразительный финал
+
+Верни строго JSON:
+{
+  "verdict": "",
+  "what_is_too_generic": [],
+  "what_is_not_practical_enough": [],
+  "what_is_weak_for_host": [],
+  "what_is_weak_for_dj": [],
+  "what_is_risky": [],
+  "must_fix_now": [],
+  "final_readiness_score": 0
+}
+"""
+
+    critic_user = f"""
+Анкета:
+{context}
+
+Аналитика:
+{json.dumps(analyst_result, ensure_ascii=False, indent=2)}
+
+Черновик сценариста:
+{json.dumps(writer_result, ensure_ascii=False, indent=2)}
+
+Замечания режиссера:
+{json.dumps(director_result, ensure_ascii=False, indent=2)}
+
+Верни только JSON.
+"""
+    critic_result = call_model_json(critic_system, critic_user)
+
+    # 5. Финальная сборка
+    final_system = """
+Ты — главный редактор итогового сценария мероприятия.
+Твоя задача: собрать финальную, готовую к работе программу для ведущего.
+
+Ты должен взять:
+- анкету клиента
+- аналитику
+- черновик сценариста
+- правки режиссера
+- замечания критика
+
+И выдать ГОТОВЫЙ ПРОДУКТ:
+- не обзор
+- не советы
+- не методичку
+- а реальный рабочий сценарий мероприятия
+
+Очень важно:
+- программа должна быть готова к практической работе ведущего
+- блоки должны быть расположены как пошаговое действие
+- тайминг должен быть расчетным и точным
+- текст ведущего должен быть расширенным и полезным
+- рекомендации диджею должны быть конкретными
+- свадьбы, корпоративы и другие мероприятия должны ощущаться по-разному
+- внутренние роли "сценарист, режиссер, критик" уже договорились между собой — в финале должен быть только сильный итог
+
+Правила качества:
+- никаких пустых общих фраз
+- юмор только безопасный
+- все должно быть применимо на площадке
+- нельзя повторять грубые формулировки клиента буквально, если это небезопасно
+- если нет точного времени старта, но есть якорь, построй реалистичную расчетную сетку и укажи, что это рабочий расчет
+
+Верни строго JSON:
+{
+  "event_passport": {
+    "event_type": "",
+    "format_name": "",
+    "city": "",
+    "venue": "",
+    "event_date": "",
+    "working_timeline_note": "",
+    "main_goal": "",
+    "atmosphere": "",
+    "style": "",
+    "mandatory_points": [],
+    "hard_bans": [],
+    "timing_anchor": ""
+  },
+  "quality_panel": {
+    "scenario_verdict": "",
+    "director_verdict": "",
+    "critic_verdict": "",
+    "final_ready": true,
+    "fixed_issues": []
+  },
+  "concept": {
+    "big_idea": "",
+    "main_director_thesis": "",
+    "main_emotional_result": "",
+    "why_this_event_will_be_remembered": ""
+  },
+  "director_logic": {
+    "opening_logic": "",
+    "development_logic": "",
+    "family_or_core_emotional_logic": "",
+    "final_logic": ""
+  },
+  "scenario_timeline": [
+    {
+      "time_from": "",
+      "time_to": "",
+      "block_title": "",
+      "block_purpose": "",
+      "what_happens": "",
+      "host_action": "",
+      "host_text": "",
+      "dj_task": "",
+      "director_move": "",
+      "risk_control": "",
+      "transition": ""
+    }
+  ],
+  "host_script": {
+    "opening_main": "",
+    "opening_short": "",
+    "welcome_line": "",
+    "first_toast_intro": "",
+    "first_dance_intro": "",
+    "family_block_intro": "",
+    "surprise_intro": "",
+    "dance_block_intro": "",
+    "cake_intro": "",
+    "closing_words": ""
+  },
+  "dj_guidance": {
+    "overall_music_policy": "",
+    "welcome_music": "",
+    "opening_music": "",
+    "table_background": "",
+    "emotional_blocks_music": "",
+    "dance_block_1": "",
+    "dance_block_2": "",
+    "dance_block_3": "",
+    "cake_music": "",
+    "final_music": "",
+    "stop_list": [],
+    "technical_notes": []
+  },
+  "guest_management": {
+    "active_people": [],
+    "shy_people": [],
+    "important_people": [],
+    "do_not_involve": [],
+    "sensitive_people_or_topics": [],
+    "management_notes": []
+  },
+  "risk_map": [
+    {
+      "risk": "",
+      "why_it_matters": "",
+      "how_to_prevent": "",
+      "what_to_do_if_triggered": ""
+    }
+  ],
+  "plan_b": [
+    {
+      "situation": "",
+      "solution": ""
+    }
+  ],
+  "final_print_version": {
+    "title": "",
+    "summary": "",
+    "timeline_short": [],
+    "must_do": [],
+    "must_not_do": [],
+    "host_focus": [],
+    "dj_focus": []
+  }
+}
+"""
+
+    final_user = f"""
+Тип мероприятия: {event_type}
+
+Анкета:
+{context}
+
+Аналитика:
+{json.dumps(analyst_result, ensure_ascii=False, indent=2)}
+
+Черновик сценариста:
+{json.dumps(writer_result, ensure_ascii=False, indent=2)}
+
+Правки режиссера:
+{json.dumps(director_result, ensure_ascii=False, indent=2)}
+
+Замечания критика:
+{json.dumps(critic_result, ensure_ascii=False, indent=2)}
+
+Собери финальный рабочий сценарий.
+Верни только JSON.
+"""
+    final_result = call_model_json(final_system, final_user)
+
+    return final_result
 
 
 def safe_filename(value: str) -> str:
@@ -414,7 +662,6 @@ def safe_filename(value: str) -> str:
 
     cleaned = "".join(result)
     cleaned = re.sub(r"_+", "_", cleaned).strip("_")
-
     return cleaned or "anketa"
 
 
@@ -442,7 +689,7 @@ def build_docx(submission: dict, program: dict) -> BytesIO:
     labels = get_questionnaire_labels()
 
     document = Document()
-    document.add_heading("Анкета мероприятия и рабочая программа ведущего", 0)
+    document.add_heading("Анкета мероприятия и режиссерская программа ведущего", 0)
 
     add_label_value(document, "ID заявки", submission["id"])
     add_label_value(document, "Создано", submission["created_at"])
@@ -452,135 +699,132 @@ def build_docx(submission: dict, program: dict) -> BytesIO:
         value = questionnaire.get(key, "")
         add_label_value(document, label, value)
 
-    add_heading(document, "2. Рабочая программа ведущего", level=1)
+    add_heading(document, "2. Готовый сценарий ведущего", level=1)
 
-    event_brief = program.get("event_brief", {})
-    add_heading(document, "2.1. Бриф события", level=2)
-    add_label_value(document, "Формат", event_brief.get("format", ""))
-    add_label_value(document, "Город", event_brief.get("city", ""))
-    add_label_value(document, "Площадка", event_brief.get("venue", ""))
-    add_label_value(document, "Дата", event_brief.get("date", ""))
-    add_label_value(document, "Атмосфера", event_brief.get("atmosphere", ""))
-    add_label_value(document, "Главная цель", event_brief.get("main_goal", ""))
-    add_label_value(document, "Тайминговый якорь", event_brief.get("timing_anchor", ""))
-    document.add_paragraph("Ключевые моменты:")
-    add_list(document, event_brief.get("key_moments", []))
-    document.add_paragraph("Жесткие ограничения:")
-    add_list(document, event_brief.get("hard_limits", []))
+    passport = program.get("event_passport", {})
+    add_heading(document, "2.1. Паспорт события", level=2)
+    add_label_value(document, "Тип", passport.get("event_type", ""))
+    add_label_value(document, "Формат", passport.get("format_name", ""))
+    add_label_value(document, "Город", passport.get("city", ""))
+    add_label_value(document, "Площадка", passport.get("venue", ""))
+    add_label_value(document, "Дата", passport.get("event_date", ""))
+    add_label_value(document, "Рабочая пометка по таймингу", passport.get("working_timeline_note", ""))
+    add_label_value(document, "Главная цель", passport.get("main_goal", ""))
+    add_label_value(document, "Атмосфера", passport.get("atmosphere", ""))
+    add_label_value(document, "Стиль", passport.get("style", ""))
+    add_label_value(document, "Тайминговый якорь", passport.get("timing_anchor", ""))
+    document.add_paragraph("Обязательные точки:")
+    add_list(document, passport.get("mandatory_points", []))
+    document.add_paragraph("Жесткие запреты:")
+    add_list(document, passport.get("hard_bans", []))
 
-    director_concept = program.get("director_concept", {})
-    add_heading(document, "2.2. Режиссерская идея", level=2)
-    add_label_value(document, "Идея", director_concept.get("idea", ""))
-    add_label_value(document, "Эмоциональная дуга", director_concept.get("emotional_arc", ""))
-    add_label_value(document, "Роль ведущего", director_concept.get("host_role", ""))
-    add_label_value(
-        document,
-        "Какое впечатление должны унести гости",
-        director_concept.get("main_impression_for_guests", ""),
-    )
+    quality_panel = program.get("quality_panel", {})
+    add_heading(document, "2.2. Внутренняя проверка качества", level=2)
+    add_label_value(document, "Вердикт сценариста", quality_panel.get("scenario_verdict", ""))
+    add_label_value(document, "Вердикт режиссера", quality_panel.get("director_verdict", ""))
+    add_label_value(document, "Вердикт критика", quality_panel.get("critic_verdict", ""))
+    document.add_paragraph("Что было исправлено:")
+    add_list(document, quality_panel.get("fixed_issues", []))
 
-    add_heading(document, "2.3. Красные флаги", level=2)
-    red_flags = program.get("red_flags", [])
-    if red_flags:
-        for index, item in enumerate(red_flags, start=1):
-            document.add_paragraph(f"{index}. {item.get('risk', 'Риск')}")
-            add_label_value(document, "Почему важно", item.get("why_it_matters", ""))
-            add_label_value(document, "Как отработать", item.get("how_to_handle", ""))
-    else:
-        document.add_paragraph("Не указано")
+    concept = program.get("concept", {})
+    add_heading(document, "2.3. Концепция", level=2)
+    add_label_value(document, "Большая идея", concept.get("big_idea", ""))
+    add_label_value(document, "Главный режиссерский тезис", concept.get("main_director_thesis", ""))
+    add_label_value(document, "Главный эмоциональный результат", concept.get("main_emotional_result", ""))
+    add_label_value(document, "Почему вечер запомнится", concept.get("why_this_event_will_be_remembered", ""))
 
-    audience_map = program.get("audience_map", {})
-    add_heading(document, "2.4. Карта аудитории", level=2)
-    add_label_value(document, "Ядро аудитории", audience_map.get("core_audience", ""))
-    add_label_value(document, "Дети", audience_map.get("children_notes", ""))
-    document.add_paragraph("Активные гости:")
-    add_list(document, audience_map.get("active_guests", []))
-    document.add_paragraph("Скромные гости:")
-    add_list(document, audience_map.get("shy_guests", []))
-    document.add_paragraph("Важные гости:")
-    add_list(document, audience_map.get("important_guests", []))
+    director_logic = program.get("director_logic", {})
+    add_heading(document, "2.4. Режиссерская ось", level=2)
+    add_label_value(document, "Логика открытия", director_logic.get("opening_logic", ""))
+    add_label_value(document, "Логика развития", director_logic.get("development_logic", ""))
+    add_label_value(document, "Логика эмоционального ядра", director_logic.get("family_or_core_emotional_logic", ""))
+    add_label_value(document, "Логика финала", director_logic.get("final_logic", ""))
+
+    add_heading(document, "2.5. Пошаговый тайминг", level=2)
+    for index, block in enumerate(program.get("scenario_timeline", []), start=1):
+        document.add_paragraph(
+            f"{index}. {block.get('time_from', '')}–{block.get('time_to', '')} | {block.get('block_title', 'Блок')}"
+        )
+        add_label_value(document, "Цель", block.get("block_purpose", ""))
+        add_label_value(document, "Что происходит", block.get("what_happens", ""))
+        add_label_value(document, "Действие ведущего", block.get("host_action", ""))
+        add_label_value(document, "Текст ведущего", block.get("host_text", ""))
+        add_label_value(document, "Задача диджея", block.get("dj_task", ""))
+        add_label_value(document, "Режиссерский ход", block.get("director_move", ""))
+        add_label_value(document, "Контроль риска", block.get("risk_control", ""))
+        add_label_value(document, "Переход", block.get("transition", ""))
+
+    host_script = program.get("host_script", {})
+    add_heading(document, "2.6. Тексты ведущего", level=2)
+    add_label_value(document, "Основное открытие", host_script.get("opening_main", ""))
+    add_label_value(document, "Короткое открытие", host_script.get("opening_short", ""))
+    add_label_value(document, "Welcome-фраза", host_script.get("welcome_line", ""))
+    add_label_value(document, "Подводка к первому тосту", host_script.get("first_toast_intro", ""))
+    add_label_value(document, "Подводка к первому танцу", host_script.get("first_dance_intro", ""))
+    add_label_value(document, "Подводка к семейному блоку", host_script.get("family_block_intro", ""))
+    add_label_value(document, "Подводка к сюрпризу", host_script.get("surprise_intro", ""))
+    add_label_value(document, "Подводка к танцевальному блоку", host_script.get("dance_block_intro", ""))
+    add_label_value(document, "Подводка к торту", host_script.get("cake_intro", ""))
+    add_label_value(document, "Финальные слова", host_script.get("closing_words", ""))
+
+    dj_guidance = program.get("dj_guidance", {})
+    add_heading(document, "2.7. Рекомендации диджею", level=2)
+    add_label_value(document, "Общая музыкальная политика", dj_guidance.get("overall_music_policy", ""))
+    add_label_value(document, "Музыка на welcome", dj_guidance.get("welcome_music", ""))
+    add_label_value(document, "Музыка на открытие", dj_guidance.get("opening_music", ""))
+    add_label_value(document, "Музыка на застольный фон", dj_guidance.get("table_background", ""))
+    add_label_value(document, "Музыка на эмоциональные блоки", dj_guidance.get("emotional_blocks_music", ""))
+    add_label_value(document, "Танцевальный блок 1", dj_guidance.get("dance_block_1", ""))
+    add_label_value(document, "Танцевальный блок 2", dj_guidance.get("dance_block_2", ""))
+    add_label_value(document, "Танцевальный блок 3", dj_guidance.get("dance_block_3", ""))
+    add_label_value(document, "Музыка на торт", dj_guidance.get("cake_music", ""))
+    add_label_value(document, "Финальная музыка", dj_guidance.get("final_music", ""))
+    document.add_paragraph("Стоп-лист:")
+    add_list(document, dj_guidance.get("stop_list", []))
+    document.add_paragraph("Технические заметки:")
+    add_list(document, dj_guidance.get("technical_notes", []))
+
+    guest_management = program.get("guest_management", {})
+    add_heading(document, "2.8. Работа с гостями", level=2)
+    document.add_paragraph("Активные люди:")
+    add_list(document, guest_management.get("active_people", []))
+    document.add_paragraph("Скромные люди:")
+    add_list(document, guest_management.get("shy_people", []))
+    document.add_paragraph("Важные люди:")
+    add_list(document, guest_management.get("important_people", []))
     document.add_paragraph("Кого не вовлекать:")
-    add_list(document, audience_map.get("guests_not_to_involve", []))
+    add_list(document, guest_management.get("do_not_involve", []))
+    document.add_paragraph("Чувствительные люди и темы:")
+    add_list(document, guest_management.get("sensitive_people_or_topics", []))
+    document.add_paragraph("Управленческие заметки:")
+    add_list(document, guest_management.get("management_notes", []))
 
-    add_heading(document, "2.5. План вечера", level=2)
-    timeline_plan = program.get("timeline_plan", [])
-    if timeline_plan:
-        for index, block in enumerate(timeline_plan, start=1):
-            document.add_paragraph(f"{index}. {block.get('block_title', 'Блок')}")
-            add_label_value(document, "Цель", block.get("block_goal", ""))
-            add_label_value(document, "Примерная длительность", block.get("approx_duration", ""))
-            add_label_value(document, "Что происходит", block.get("what_happens", ""))
-            add_label_value(document, "Задача ведущего", block.get("host_task", ""))
-            add_label_value(document, "Переход дальше", block.get("transition_to_next", ""))
-    else:
-        document.add_paragraph("Не указано")
+    add_heading(document, "2.9. Риски", level=2)
+    for index, risk in enumerate(program.get("risk_map", []), start=1):
+        document.add_paragraph(f"{index}. {risk.get('risk', 'Риск')}")
+        add_label_value(document, "Почему важно", risk.get("why_it_matters", ""))
+        add_label_value(document, "Как предотвратить", risk.get("how_to_prevent", ""))
+        add_label_value(document, "Что делать, если случилось", risk.get("what_to_do_if_triggered", ""))
 
-    host_lines = program.get("host_lines", {})
-    add_heading(document, "2.6. Реплики ведущего", level=2)
-    add_label_value(document, "Основное открытие", host_lines.get("opening_main", ""))
-    add_label_value(document, "Короткое открытие", host_lines.get("opening_short", ""))
-    add_label_value(document, "Подводка к первому танцу", host_lines.get("intro_first_dance", ""))
-    add_label_value(document, "Подводка к семейному блоку", host_lines.get("intro_family_block", ""))
-    add_label_value(document, "Подводка к сюрпризу", host_lines.get("intro_surprise_block", ""))
-    add_label_value(document, "Подводка к торту", host_lines.get("intro_cake", ""))
-    add_label_value(document, "Финальные слова", host_lines.get("closing_lines", ""))
+    add_heading(document, "2.10. План Б", level=2)
+    for index, item in enumerate(program.get("plan_b", []), start=1):
+        document.add_paragraph(f"{index}. {item.get('situation', 'Ситуация')}")
+        add_label_value(document, "Решение", item.get("solution", ""))
 
-    add_heading(document, "2.7. Интерактивы", level=2)
-    interactive_blocks = program.get("interactive_blocks", [])
-    if interactive_blocks:
-        for index, item in enumerate(interactive_blocks, start=1):
-            document.add_paragraph(f"{index}. {item.get('title', 'Интерактив')}")
-            add_label_value(document, "Цель", item.get("goal", ""))
-            add_label_value(document, "Когда лучше", item.get("best_moment", ""))
-            add_label_value(document, "Как провести", item.get("how_to_run", ""))
-            add_label_value(document, "Почему безопасно", item.get("why_it_is_safe", ""))
-    else:
-        document.add_paragraph("Не указано")
-
-    add_heading(document, "2.8. Банк мягкого юмора", level=2)
-    humor_bank = program.get("humor_bank", [])
-    if humor_bank:
-        for index, item in enumerate(humor_bank, start=1):
-            document.add_paragraph(f"{index}. {item.get('line', 'Шутка')}")
-            add_label_value(document, "Тон", item.get("tone", ""))
-            add_label_value(document, "Где использовать", item.get("where_to_use", ""))
-            add_label_value(document, "Примечание по безопасности", item.get("safety_note", ""))
-    else:
-        document.add_paragraph("Не указано")
-
-    add_heading(document, "2.9. План Б", level=2)
-    plan_b = program.get("plan_b", [])
-    if plan_b:
-        for index, item in enumerate(plan_b, start=1):
-            document.add_paragraph(f"{index}. {item.get('situation', 'Ситуация')}")
-            add_label_value(document, "Что делать", item.get("response", ""))
-    else:
-        document.add_paragraph("Не указано")
-
-    final_strategy = program.get("final_strategy", {})
-    add_heading(document, "2.10. Финальная стратегия", level=2)
-    add_label_value(document, "Как вести этот вечер", final_strategy.get("how_to_lead_this_event", ""))
-    add_label_value(document, "Чего избегать", final_strategy.get("what_to_avoid", ""))
-    add_label_value(
-        document,
-        "Что сделает вечер сильным",
-        final_strategy.get("what_will_make_this_event_strong", ""),
-    )
-
-    print_version = program.get("print_version", {})
-    add_heading(document, "2.11. Краткая печатная версия", level=2)
-    add_label_value(document, "Название", print_version.get("title", ""))
-    add_label_value(document, "Краткое резюме", print_version.get("event_summary", ""))
-    document.add_paragraph("Ключевые люди:")
-    add_list(document, print_version.get("key_people", []))
-    document.add_paragraph("Обязательные блоки:")
-    add_list(document, print_version.get("must_do_blocks", []))
-    document.add_paragraph("Нельзя делать:")
-    add_list(document, print_version.get("do_not_do", []))
+    final_print = program.get("final_print_version", {})
+    add_heading(document, "2.11. Краткая версия для печати", level=2)
+    add_label_value(document, "Название", final_print.get("title", ""))
+    add_label_value(document, "Краткое резюме", final_print.get("summary", ""))
     document.add_paragraph("Короткий таймлайн:")
-    add_list(document, print_version.get("short_timeline", []))
+    add_list(document, final_print.get("timeline_short", []))
+    document.add_paragraph("Обязательно сделать:")
+    add_list(document, final_print.get("must_do", []))
+    document.add_paragraph("Нельзя делать:")
+    add_list(document, final_print.get("must_not_do", []))
     document.add_paragraph("Фокус ведущего:")
-    add_list(document, print_version.get("host_focus_points", []))
+    add_list(document, final_print.get("host_focus", []))
+    document.add_paragraph("Фокус диджея:")
+    add_list(document, final_print.get("dj_focus", []))
 
     buffer = BytesIO()
     document.save(buffer)
@@ -595,6 +839,7 @@ def root():
         "message": "Event AI backend is running",
         "data_path": str(SUBMISSIONS_FILE),
         "using_railway_volume": bool(railway_mount_path),
+        "model": AI_MODEL,
     }
 
 
@@ -659,7 +904,7 @@ def generate_program(submission_id: str):
         raise HTTPException(status_code=404, detail="Анкета не найдена")
 
     try:
-        program = generate_ai_program(found_item["questionnaire"])
+        program = generate_agent_program(found_item["questionnaire"])
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Ошибка генерации программы: {error}")
 
@@ -679,7 +924,7 @@ def export_docx(submission_id: str):
         raise HTTPException(status_code=404, detail="Анкета не найдена")
 
     try:
-        program = generate_ai_program(found_item["questionnaire"])
+        program = generate_agent_program(found_item["questionnaire"])
         file_buffer = build_docx(found_item, program)
 
         client_name = safe_filename(found_item["questionnaire"].get("clientName", "anketa"))
