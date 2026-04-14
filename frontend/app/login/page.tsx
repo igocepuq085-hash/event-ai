@@ -27,8 +27,9 @@ export default function LoginPage() {
       }
 
       window.location.href = "/host";
-    } catch (e: any) {
-      setError(e.message || "Ошибка входа");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Ошибка входа";
+      setError(message);
     } finally {
       setLoading(false);
     }

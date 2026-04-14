@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
   response.cookies.set("host_auth", expectedPassword, {
     httpOnly: true,
     sameSite: "lax",
-    secure: true,
+    secure: request.nextUrl.protocol === "https:",
     path: "/",
     maxAge: 60 * 60 * 24 * 14,
   });
