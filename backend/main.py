@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import Optional
 from pathlib import Path
 import json
+import os
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -14,12 +15,19 @@ load_dotenv()
 
 app = FastAPI(title="Event AI Backend")
 
+# Можно дополнять новыми доменами фронта через переменную FRONTEND_ORIGINS
+extra_origins = os.getenv("FRONTEND_ORIGINS", "")
+parsed_extra_origins = [item.strip() for item in extra_origins.split(",") if item.strip()]
+
+allowed_origins = [
+    "http://localhost:3000",
+    "https://frontend-production-c187.up.railway.app",
+    *parsed_extra_origins,
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://frontend-production-c187.up.railway.app",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,8 +35,14 @@ app.add_middleware(
 
 client = OpenAI()
 
-DATA_DIR = Path("data")
-DATA_DIR.mkdir(exist_ok=True)
+# Если есть Railway Volume, храним там. Иначе локально в ./data
+railway_mount_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+if railway_mount_path:
+    DATA_DIR = Path(railway_mount_path) / "event_ai_data"
+else:
+    DATA_DIR = Path("data")
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 SUBMISSIONS_FILE = DATA_DIR / "submissions.json"
 
@@ -99,8 +113,9 @@ def load_submissions() -> list:
 
     try:
         with open(SUBMISSIONS_FILE, "r", encoding="utf-8") as file:
-            return json.load(file)
-    except json.JSONDecodeError:
+            data = json.load(file)
+            return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
         return []
 
 
@@ -185,52 +200,24 @@ def try_parse_json(content: str) -> dict:
 
 
 def generate_ai_program(questionnaire: dict) -> dict:
-    print("1. Начали собирать контекст анкеты")
     context = build_questionnaire_context(questionnaire)
-    print("2. Контекст собран, отправляем запрос в OpenAI")
 
     system_prompt = """
-Ты — не аналитик анкеты и не консультант в общем смысле.
-Ты — профессиональный сценарист, режиссер мероприятия и помощник ведущего с практическим опытом работы на свадьбах, юбилеях, днях рождениях, корпоративах и частных событиях.
-
-Ты работаешь только на русском языке.
-
-Твоя задача:
-на основе анкеты клиента создавать не обзор ответов, а полноценный внутренний рабочий документ для ведущего, пригодный для подготовки, печати, редактирования и реального использования на площадке.
-
-Ты должен мыслить как человек, который реально готовит мероприятие:
-- чувствуешь драматургию вечера
-- понимаешь ритм зала
-- видишь риски
-- умеешь строить подводки
-- умеешь переводить ответы анкеты в конкретные действия ведущего
+Ты — профессиональный сценарист, режиссер мероприятия и помощник ведущего.
+Работаешь только на русском языке.
+Ты создаешь не обзор анкеты, а рабочий документ для ведущего.
 
 Главные принципы:
 - не пересказывай анкету
 - не делай статистику ответов
 - не пиши воду
 - не пиши слишком общие советы
-- не делай шаблонный свадебный текст
+- не делай шаблонный текст
 - не предлагай пошлые, унизительные или устаревшие конкурсы
-- не используй рискованный юмор, который может задеть гостей
-- не переносить в программу грубые или опасные формулировки из анкеты напрямую, даже если клиент сам так пошутил
-- если информации мало, не выдумывай лишнего, а строй аккуратные, реалистичные и безопасные решения на основе имеющихся данных
+- не используй рискованный юмор
+- если информации мало, строй аккуратные и безопасные решения
 
-Ты должен выдавать именно рабочий документ ведущего:
-- с идеей вечера
-- с режиссерской логикой
-- с рисками
-- с очередностью блоков
-- с готовыми подводками
-- с безопасными интерактивами
-- с мягким уместным юмором
-- с планом Б
-- с отдельной компактной версией для печати
-
-Ответ возвращай строго в JSON по заданной структуре.
-Никакого текста вне JSON.
-
-Структура JSON:
+Ответ возвращай строго в JSON по структуре:
 {
   "event_brief": {
     "format": "",
@@ -325,36 +312,7 @@ def generate_ai_program(questionnaire: dict) -> dict:
 
     user_prompt = f"""
 Ниже анкета клиента.
-
-Твоя задача — не анализировать ответы как статистику и не пересказывать анкету, а превратить ее в рабочий документ для ведущего.
-
-Нужен результат уровня:
-- сценарист
-- режиссер вечера
-- помощник ведущего
-- редактор реальной программы
-
-Сделай:
-1. Короткий бриф события.
-2. Режиссерскую идею вечера.
-3. Красные флаги и способы их обхода.
-4. Карту аудитории.
-5. Структурный план вечера по блокам.
-6. Готовые подводки ведущего к ключевым моментам.
-7. Безопасные интерактивы.
-8. Банк мягкого уместного юмора.
-9. План Б на случай проблем.
-10. Финальную стратегию ведения.
-11. Компактную печатную версию для работы на площадке.
-
-Важно:
-- не быть общим
-- не писать банальности
-- не делать обзор анкеты
-- переводить ответы клиента в конкретные действия ведущего
-- использовать реальные детали анкеты
-- не использовать рискованный юмор даже если клиент сам формулирует что-то грубо
-- результат должен быть полезен в реальной работе на площадке
+Преврати ее в рабочий документ для ведущего, а не в обзор ответов.
 
 Вот анкета клиента:
 
@@ -363,29 +321,25 @@ def generate_ai_program(questionnaire: dict) -> dict:
 Ответ только в JSON.
 """
 
-    try:
-        response = client.responses.create(
-            model="gpt-5.4-mini",
-            input=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
+    response = client.responses.create(
+        model="gpt-5.4-mini",
+        input=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
 
-        print("3. Ответ от OpenAI получен")
-        content = response.output_text
-        print("4. Разбираем JSON")
-        result = try_parse_json(content)
-        print("5. JSON успешно разобран")
-        return result
-    except Exception as error:
-        print("Ошибка внутри generate_ai_program:", error)
-        raise
+    return try_parse_json(response.output_text)
 
 
 @app.get("/")
 def root():
-    return {"status": "ok", "message": "Event AI backend is running"}
+    return {
+        "status": "ok",
+        "message": "Event AI backend is running",
+        "data_path": str(SUBMISSIONS_FILE),
+        "using_railway_volume": bool(railway_mount_path),
+    }
 
 
 @app.get("/health")
@@ -416,9 +370,6 @@ def submit_questionnaire(payload: QuestionnaireSubmission):
     submissions = load_submissions()
     submissions.append(record)
     save_submissions(submissions)
-
-    print("Получена анкета:")
-    print(submission_data)
 
     return {
         "status": "success",
@@ -454,7 +405,6 @@ def generate_program(submission_id: str):
     try:
         program = generate_ai_program(found_item["questionnaire"])
     except Exception as error:
-        print("Ошибка генерации программы:", error)
         raise HTTPException(status_code=500, detail=f"Ошибка генерации программы: {error}")
 
     return {
