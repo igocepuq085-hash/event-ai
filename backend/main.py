@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from threading import Lock, Thread
+from time import sleep
 from typing import Any
 
 from docx import Document
@@ -33,6 +34,8 @@ STRICT_AI_ONLY = os.getenv("STRICT_AI_ONLY", "true" if EVENT_AI_MODE == "premium
 OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "180" if EVENT_AI_MODE == "premium" else "60"))
 OPENAI_TIMEOUT_RETRY_MODEL = os.getenv("OPENAI_TIMEOUT_RETRY_MODEL", "gpt-5.4-mini" if EVENT_AI_MODE == "premium" else "").strip()
 OPENAI_TIMEOUT_RETRY_REASONING = os.getenv("OPENAI_TIMEOUT_RETRY_REASONING", "low" if EVENT_AI_MODE == "premium" else AI_REASONING_EFFORT).strip()
+OPENAI_GATEWAY_RETRIES = int(os.getenv("OPENAI_GATEWAY_RETRIES", "3"))
+OPENAI_GATEWAY_RETRY_DELAY_SECONDS = float(os.getenv("OPENAI_GATEWAY_RETRY_DELAY_SECONDS", "2.5"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 FRONTEND_ORIGINS = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000")
 RAILWAY_VOLUME_MOUNT_PATH = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
@@ -1608,19 +1611,41 @@ def is_timeout_error(error: Exception) -> bool:
     return "timed out" in text or "timeout" in text or "time out" in text
 
 
+def is_gateway_error(error: Exception) -> bool:
+    text = str(error).lower()
+    return (
+        "502 bad gateway" in text
+        or "503 service unavailable" in text
+        or "504 gateway timeout" in text
+        or "bad gateway" in text
+    )
+
+
 def request_program_from_openai(*, system_prompt: str, user_prompt: str, model: str, reasoning_effort: str) -> dict[str, Any]:
     if client is None:
         raise RuntimeError("OpenAI client unavailable")
-    response = client.responses.create(
-        model=model,
-        reasoning={"effort": reasoning_effort},
-        input=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    )
-    raw_text = response.output_text.strip()
-    return parse_json_response(raw_text)
+    last_error: Exception | None = None
+    attempts = max(1, OPENAI_GATEWAY_RETRIES)
+    for attempt in range(1, attempts + 1):
+        try:
+            response = client.responses.create(
+                model=model,
+                reasoning={"effort": reasoning_effort},
+                input=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+            raw_text = response.output_text.strip()
+            return parse_json_response(raw_text)
+        except Exception as error:
+            last_error = error
+            if not is_gateway_error(error) or attempt >= attempts:
+                break
+            sleep(OPENAI_GATEWAY_RETRY_DELAY_SECONDS * attempt)
+    if last_error is not None:
+        raise RuntimeError(f"OpenAI upstream error after retries: {last_error}")
+    raise RuntimeError("OpenAI request failed without explicit error")
 
 
 def parse_json_response(raw_text: str) -> dict[str, Any]:
@@ -2068,6 +2093,8 @@ def root() -> dict[str, Any]:
         "model": AI_MODEL,
         "reasoning_effort": AI_REASONING_EFFORT,
         "strict_ai_only": STRICT_AI_ONLY,
+        "openai_timeout_seconds": OPENAI_TIMEOUT_SECONDS,
+        "openai_gateway_retries": OPENAI_GATEWAY_RETRIES,
         "openai_enabled": bool(client),
         "supported_event_types": sorted(SUPPORTED_EVENT_TYPES),
     }
@@ -2081,6 +2108,8 @@ def health() -> dict[str, Any]:
         "model": AI_MODEL,
         "reasoning_effort": AI_REASONING_EFFORT,
         "strict_ai_only": STRICT_AI_ONLY,
+        "openai_timeout_seconds": OPENAI_TIMEOUT_SECONDS,
+        "openai_gateway_retries": OPENAI_GATEWAY_RETRIES,
         "openai_enabled": bool(client),
     }
 
