@@ -9,6 +9,13 @@ export type Submission = {
   created_at: string;
   questionnaire: Record<string, string>;
   program?: Record<string, unknown>;
+  generation?: {
+    status: string;
+    stage?: string;
+    message?: string;
+    error?: string;
+    updated_at?: string;
+  };
 };
 
 export type QuestionnairePayload = Record<string, string>;

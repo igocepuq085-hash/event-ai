@@ -6,14 +6,44 @@ import { useParams } from "next/navigation";
 import { CLIENT_API_PREFIX, fetchApi, type Submission } from "@/lib/api";
 import { AppShell } from "@/components/shell";
 
-type ProgramResponse = {
-  program: Record<string, unknown>;
+type GenerationState = {
+  status: string;
+  stage?: string;
+  message?: string;
+  error?: string;
+  updated_at?: string;
 };
+
+type GenerationResponse = {
+  generation: GenerationState;
+  hasProgram?: boolean;
+  program?: Record<string, unknown>;
+};
+
+function getStageLabel(stage?: string) {
+  switch (stage) {
+    case "analyst":
+      return "Аналитик";
+    case "trend_analyst":
+      return "Trend analyst";
+    case "scenarist_director_critic":
+      return "Сценарист / режиссер / критик";
+    case "final_assembly":
+      return "Финальная сборка";
+    case "queued":
+      return "Очередь";
+    case "failed":
+      return "Ошибка";
+    default:
+      return "Ожидание";
+  }
+}
 
 export default function HostDetailPage() {
   const params = useParams<{ id: string }>();
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [program, setProgram] = useState<Record<string, unknown> | null>(null);
+  const [generation, setGeneration] = useState<GenerationState>({ status: "idle" });
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
   const id = params.id;
@@ -23,6 +53,7 @@ export default function HostDetailPage() {
     fetchApi<{ item: Submission }>(`/api/submissions/${id}`)
       .then((data) => {
         setSubmission(data.item);
+        setGeneration(data.item.generation || { status: "idle" });
         if (data.item.program) {
           setProgram(data.item.program);
         }
@@ -32,13 +63,42 @@ export default function HostDetailPage() {
       });
   }, [id]);
 
+  useEffect(() => {
+    if (!id) return;
+    if (!["queued", "running"].includes(generation.status)) return;
+
+    const intervalId = window.setInterval(async () => {
+      try {
+        const statusData = await fetchApi<GenerationResponse>(`/api/submissions/${id}/generation-status`);
+        setGeneration(statusData.generation);
+        if (statusData.hasProgram) {
+          const data = await fetchApi<{ item: Submission }>(`/api/submissions/${id}`);
+          setSubmission(data.item);
+          setGeneration(data.item.generation || { status: "ready" });
+          if (data.item.program) {
+            setProgram(data.item.program);
+          }
+          window.clearInterval(intervalId);
+        }
+      } catch (pollError) {
+        setError(pollError instanceof Error ? pollError.message : "Не удалось обновить статус генерации");
+        window.clearInterval(intervalId);
+      }
+    }, 2500);
+
+    return () => window.clearInterval(intervalId);
+  }, [generation.status, id]);
+
   const handleGenerate = () => {
     if (!id) return;
     setError("");
     startTransition(async () => {
       try {
-        const data = await fetchApi<ProgramResponse>(`/api/submissions/${id}/generate-program`, { method: "POST" });
-        setProgram(data.program);
+        const data = await fetchApi<GenerationResponse>(`/api/submissions/${id}/generate-program/start`, { method: "POST" });
+        setGeneration(data.generation);
+        if (data.program) {
+          setProgram(data.program);
+        }
       } catch (generateError) {
         setError(generateError instanceof Error ? generateError.message : "Ошибка генерации");
       }
@@ -46,6 +106,8 @@ export default function HostDetailPage() {
   };
 
   const downloadUrl = id ? `${CLIENT_API_PREFIX}/api/submissions/${id}/export-docx` : "#";
+  const isGenerating = isPending || ["queued", "running"].includes(generation.status);
+  const canDownload = generation.status === "ready" && Boolean(program);
   const passport = (program?.event_passport as Record<string, unknown> | undefined) || null;
   const timeline = (program?.scenario_timeline as Record<string, unknown>[] | undefined) || [];
   const hostCommands = (program?.key_host_commands as string[] | undefined) || [];
@@ -62,14 +124,15 @@ export default function HostDetailPage() {
             <button
               type="button"
               onClick={handleGenerate}
-              disabled={isPending || !id}
+              disabled={isGenerating || !id}
               className="rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-70"
             >
-              {isPending ? "Генерация..." : "Сформировать программу"}
+              {isGenerating ? "Генерация в работе..." : "Сформировать программу"}
             </button>
             <a
               href={downloadUrl}
-              className="rounded-full border border-[var(--border)] bg-white/70 px-5 py-3 text-sm font-semibold text-stone-800"
+              aria-disabled={!canDownload}
+              className={`rounded-full border border-[var(--border)] bg-white/70 px-5 py-3 text-sm font-semibold text-stone-800 ${canDownload ? "" : "pointer-events-none opacity-50"}`}
             >
               Скачать .docx
             </a>
@@ -77,6 +140,12 @@ export default function HostDetailPage() {
         </div>
 
         {error ? <div className="rounded-[24px] border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">{error}</div> : null}
+        {generation.status !== "idle" ? (
+          <div className="rounded-[24px] border border-[var(--border)] bg-white/80 px-5 py-4 text-sm text-stone-700">
+            <div className="font-medium text-stone-900">Статус генерации: {getStageLabel(generation.stage || generation.status)}</div>
+            <div className="mt-1">{generation.error || generation.message || "Генерация запущена."}</div>
+          </div>
+        ) : null}
 
         <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
           <div className="rounded-[32px] border border-[var(--border)] bg-white/75 p-6">

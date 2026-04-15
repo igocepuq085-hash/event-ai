@@ -6,6 +6,7 @@ import re
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+from threading import Lock, Thread
 from typing import Any
 
 from docx import Document
@@ -37,6 +38,8 @@ DATA_DIR = (
 )
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 SUBMISSIONS_FILE = DATA_DIR / "submissions.json"
+GENERATION_THREAD_LOCK = Lock()
+GENERATION_THREADS: dict[str, Thread] = {}
 
 client = OpenAI(api_key=OPENAI_API_KEY, timeout=60.0) if OpenAI and OPENAI_API_KEY else None
 
@@ -208,16 +211,18 @@ def build_metaphoric_text(
     guest_focus: str,
 ) -> str:
     metaphors = [
-        f"Пусть {block_label.lower()} войдет в зал как первый луч в распахнутое окно и сразу покажет людям, куда сегодня смотрит сердце вечера.",
-        "Пусть слова ведущего лягут не кирпичами, а мягким светом на плечи гостей, чтобы никто не почувствовал давления, а каждый услышал живой смысл.",
-        "Пусть настроение соберется как оркестр перед увертюрой: сначала дыхание, потом ритм, потом ясная мелодия общего внимания.",
-        "Пусть этот момент станет не формальной остановкой, а мостом между людьми, по которому зал спокойно перейдет к следующей эмоции.",
-        f"Пусть история {heroes} прозвучит не открыткой, а рекой с глубиной, в которой есть течение, отражение и настоящая сила.",
-        f"Пусть атмосфера {atmosphere} держится в воздухе как дорогой аромат: ее не видно руками, но именно она делает событие узнаваемым.",
-        "Пусть каждый поворот речи работает как камера крупного плана, вытаскивая не шум, а нужную деталь, из-за которой вечер становится личным.",
-        "Пусть зал в этом блоке дышит как один организм: без суеты, без лишнего шума, без ощущения, что людей тянут туда, куда им не хочется.",
-        "Пусть ведущий держит ритм как дирижер держит паузу: уверенно, спокойно, понимая, что иногда тишина звучит сильнее фанфар.",
-        "Пусть финальная интонация блока закроется как красивая кинематографичная склейка, после которой следующий эпизод начинается естественно и точно.",
+        f"{block_label} должен войти в зал как первый луч в распахнутое окно и сразу показать людям, куда сегодня смотрит сердце вечера.",
+        "Слова ведущего здесь работают не как кирпичи протокола, а как мягкий свет на плечах гостей: они не давят, а собирают внимание.",
+        "Настроение важно собирать как оркестр перед увертюрой: сначала дыхание, потом ритм, потом общая мелодия зала.",
+        "Этот момент должен стать не формальной остановкой, а мостом между людьми, по которому гости спокойно переходят к следующей эмоции.",
+        f"История {heroes} должна звучать не как отполированная открытка, а как река с течением, глубиной и настоящими берегами.",
+        f"Атмосфера {atmosphere} здесь нужна как дорогой аромат: ее невозможно взять руками, но именно она делает вечер узнаваемым.",
+        "Каждый поворот речи пусть работает как камера крупного плана, вытаскивая не шум, а ту самую деталь, из-за которой вечер становится личным.",
+        "Зал в этом блоке важно держать как единый организм: без суеты, без лишнего шума, без ощущения, что людей тянут за локоть в чужую эмоцию.",
+        "Ведущий держит ритм как дирижер держит паузу: уверенно, спокойно и с пониманием, что тишина иногда звучит громче фанфар.",
+        "Финальная интонация блока должна закрываться как точная кинематографичная склейка, после которой следующий эпизод начинается естественно.",
+        "Хорошая реплика здесь должна сработать как бокал тонкого стекла: легкая на слух, но с долгим послевкусием.",
+        "Герои вечера не витрина, а живой нерв события, и задача речи не полировать его до глянца, а подсветить так, чтобы зал это почувствовал.",
     ]
     return " ".join(
         [
@@ -762,6 +767,63 @@ def is_program_detailed(program: dict[str, Any]) -> bool:
     return True
 
 
+def build_event_analyst_brief(questionnaire: dict[str, Any]) -> dict[str, Any]:
+    event_type = questionnaire.get("eventType", "")
+    lead_heroes = (
+        f"{questionnaire.get('groomName', '').strip()} и {questionnaire.get('brideName', '').strip()}".strip()
+        if event_type == "wedding"
+        else questionnaire.get("celebrantName", "").strip()
+    )
+    atmosphere = questionnaire.get("atmosphere") or questionnaire.get("anniversaryAtmosphere") or "современная, живая, собранная"
+    sensitive = list_from_text(
+        questionnaire.get("conflictTopics", "") + "\n" + questionnaire.get("jubileeConflictTopics", ""),
+        ["избегать чувствительных тем без согласования"],
+    )
+    return {
+        "event_type": event_type,
+        "lead_heroes": lead_heroes or questionnaire.get("clientName", "").strip() or "герои вечера",
+        "city": questionnaire.get("city", ""),
+        "venue": questionnaire.get("venue", ""),
+        "date": questionnaire.get("eventDate", ""),
+        "start_time": questionnaire.get("startTime", ""),
+        "atmosphere": atmosphere,
+        "goal": "выдать пригодный для площадки рабочий сценарий, а не обзор анкеты",
+        "sensitive_topics": sensitive,
+        "must_keep": list_from_text(questionnaire.get("keyMoments", ""), ["сильное открытие", "эмоциональное ядро", "финал"]),
+        "music_constraints": list_from_text(questionnaire.get("musicBans", ""), ["не ломать эмоциональные сцены"]),
+    }
+
+
+def build_trend_analyst_brief(questionnaire: dict[str, Any]) -> dict[str, Any]:
+    if questionnaire.get("eventType") == "wedding":
+        return {
+            "tone": "editorial romance without sugar",
+            "hosting_style": [
+                "образная сценичная речь без свадебных штампов",
+                "мягкое вовлечение вместо конкурсов",
+                "ощущение дорогой режиссуры и вкуса",
+            ],
+            "music_logic": [
+                "welcome через nu-disco, soul-pop, elegant house",
+                "эмоциональные сцены через piano, strings, ambient textures",
+                "танцпол через узнаваемые pop-dance и disco edits без вкусового провала",
+            ],
+        }
+    return {
+        "tone": "warm prestige with wit and biography-driven dramaturgy",
+        "hosting_style": [
+            "сценичная живая речь без канцелярита",
+            "уважение к возрасту и статусу гостей без официоза",
+            "ирония и свет вместо пафоса",
+        ],
+        "music_logic": [
+            "welcome через soul, lounge, light funk",
+            "эмоциональные блоки без сладкой ретро-банальности",
+            "танцпол через возрастной микс с вкусом и понятным разгоном",
+        ],
+    }
+
+
 def build_system_prompt() -> str:
     return """
 Ты — сильный event-режиссер, сценарист ведущих и редактор финального рабочего документа.
@@ -801,6 +863,82 @@ risk_map
 plan_b
 final_print_version
 """
+
+
+def build_stage_system_prompt() -> str:
+    return """
+Ты работаешь как одна быстрая, но сильная связка ролей:
+- аналитик
+- trend analyst
+- сценарист
+- режиссер
+- критик
+- финальная сборка
+
+Работаешь только с двумя типами мероприятий:
+- wedding
+- jubilee
+
+Твоя задача: на основе анкеты собрать ГОТОВЫЙ рабочий сценарий для ведущего.
+Это не обзор анкеты и не список советов.
+Это прикладной документ для настоящей работы на площадке.
+
+Критические требования:
+- один основной сильный AI-вызов
+- никакой воды
+- никакого канцелярита
+- никакой шаблонной романтической или юбилейной банальности
+- никаких кринжовых конкурсов, токсичного юмора и устаревших форматов
+- стиль речи ведущего должен быть образным, метафоричным, небанальным, остроумным, сценичным, живым и эмоционально гибким
+- метафоры должны быть свежими, а не заезженными
+- текст должен звучать как авторская речь для реальной сцены, а не как генератор открыток
+- ключевые тексты ведущего должны быть длинными и пригодными к чтению 3-5 минут
+- host_text в каждом блоке тайминга должен содержать не менее 10 интересных метафорических образов
+- DJ guidance должен быть прикладным: трековые ориентиры, ритм захода, связки, что не включать, как поднимать зал, как спасать просадку и как не ломать эмоциональные сцены
+- если данных не хватает, не ломайся: строй лучший рабочий вариант и отдельно выноси уточнения
+
+Как мыслить внутри одного ответа:
+1. Аналитик: собери суть анкеты, конфликтные зоны, обязательные точки, драматургический потенциал.
+2. Trend analyst: отфильтруй устаревшие приемы и определи современную event-логику для такого формата.
+3. Сценарист: построй подробный тайминг и длинные тексты ведущего.
+4. Режиссер: проверь ритм, переходы, музыкальную логику и управление залом.
+5. Критик: найди слабые места и поправь их до финальной версии.
+6. Финальная сборка: верни только сильный итоговый JSON.
+
+Верни строго JSON с ключами:
+event_passport
+quality_panel
+concept
+trend_layer
+key_host_commands
+questions_to_clarify_before_event
+director_logic
+scenario_timeline
+host_script
+dj_guidance
+guest_management
+risk_map
+plan_b
+final_print_version
+"""
+
+
+def build_generation_user_prompt(questionnaire: dict[str, Any]) -> str:
+    analyst_brief = json.dumps(build_event_analyst_brief(questionnaire), ensure_ascii=False, indent=2)
+    trend_brief = json.dumps(build_trend_analyst_brief(questionnaire), ensure_ascii=False, indent=2)
+    return (
+        f"Тип мероприятия: {questionnaire['eventType']}\n\n"
+        "Анкета:\n"
+        f"{build_questionnaire_context(questionnaire)}\n\n"
+        "Бриф аналитика:\n"
+        f"{analyst_brief}\n\n"
+        "Бриф trend analyst:\n"
+        f"{trend_brief}\n\n"
+        "Верни только валидный JSON. Нельзя сокращать сценарий до обзора. "
+        "Нужен подробный прикладной документ, по которому ведущий и DJ реально смогут работать на площадке. "
+        "В каждом host_text должно быть не меньше 10 свежих, небанальных метафор. "
+        "DJ guidance должен содержать трековые ориентиры, музыкальную логику, входы, выходы, stop list и rescue-логику."
+    )
 
 
 def normalize_program(program: dict[str, Any], questionnaire: dict[str, Any]) -> dict[str, Any]:
@@ -877,7 +1015,7 @@ def generate_agent_program(questionnaire: dict[str, Any]) -> dict[str, Any]:
             model=AI_MODEL,
             reasoning={"effort": "low"},
             input=[
-                {"role": "system", "content": build_system_prompt()},
+                {"role": "system", "content": build_stage_system_prompt()},
                 {
                     "role": "user",
                     "content": (
@@ -894,6 +1032,30 @@ def generate_agent_program(questionnaire: dict[str, Any]) -> dict[str, Any]:
         program = normalize_program(program, questionnaire)
         program["_schema_version"] = PROGRAM_SCHEMA_VERSION
         return program
+    except Exception:
+        return fallback_program
+
+
+def generate_agent_program_fast(questionnaire: dict[str, Any]) -> dict[str, Any]:
+    fallback_program = build_target_program(questionnaire)
+    fallback_program["_schema_version"] = PROGRAM_SCHEMA_VERSION
+    if client is None:
+        return fallback_program
+
+    try:
+        response = client.responses.create(
+            model=AI_MODEL,
+            reasoning={"effort": "low"},
+            input=[
+                {"role": "system", "content": build_stage_system_prompt()},
+                {"role": "user", "content": build_generation_user_prompt(questionnaire)},
+            ],
+        )
+        raw_text = response.output_text.strip()
+        program = parse_json_response(raw_text)
+        program = normalize_program(program, questionnaire)
+        program["_schema_version"] = PROGRAM_SCHEMA_VERSION
+        return program if is_program_detailed(program) else fallback_program
     except Exception:
         return fallback_program
 
@@ -1116,6 +1278,76 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
     return buffer
 
 
+def default_generation_state() -> dict[str, Any]:
+    return {
+        "status": "idle",
+        "stage": "",
+        "message": "",
+        "error": "",
+        "updated_at": datetime.now().isoformat(),
+    }
+
+
+def save_generation_state(
+    submission_id: str,
+    *,
+    status: str,
+    stage: str = "",
+    message: str = "",
+    error: str = "",
+    program: dict[str, Any] | None = None,
+) -> None:
+    submissions = load_submissions()
+    for index, submission in enumerate(submissions):
+        if submission["id"] != submission_id:
+            continue
+        generation = submission.get("generation")
+        if not isinstance(generation, dict):
+            generation = default_generation_state()
+        generation.update(
+            {
+                "status": status,
+                "stage": stage,
+                "message": message,
+                "error": error,
+                "updated_at": datetime.now().isoformat(),
+            }
+        )
+        submissions[index]["generation"] = generation
+        if program is not None:
+            submissions[index]["program"] = program
+        save_submissions(submissions)
+        return
+
+
+def run_generation_job(submission_id: str) -> None:
+    try:
+        submissions, index = get_submission_or_404(submission_id)
+        questionnaire = submissions[index]["questionnaire"]
+        save_generation_state(submission_id, status="running", stage="analyst", message="Собираем драматургическое ядро анкеты")
+        _ = build_event_analyst_brief(questionnaire)
+        save_generation_state(submission_id, status="running", stage="trend_analyst", message="Проверяем современную event-логику")
+        _ = build_trend_analyst_brief(questionnaire)
+        save_generation_state(submission_id, status="running", stage="scenarist_director_critic", message="Генерируем сценарий, режиссуру и финальную сборку")
+        program = generate_agent_program_fast(questionnaire)
+        save_generation_state(submission_id, status="ready", stage="final_assembly", message="Программа готова", program=program)
+    except Exception as error:
+        save_generation_state(submission_id, status="failed", stage="failed", error=str(error), message="Генерация завершилась с ошибкой")
+    finally:
+        with GENERATION_THREAD_LOCK:
+            GENERATION_THREADS.pop(submission_id, None)
+
+
+def start_generation_job(submission_id: str) -> None:
+    with GENERATION_THREAD_LOCK:
+        existing = GENERATION_THREADS.get(submission_id)
+        if existing and existing.is_alive():
+            return
+        worker = Thread(target=run_generation_job, args=(submission_id,), daemon=True)
+        GENERATION_THREADS[submission_id] = worker
+        worker.start()
+
+
 def get_submission_or_404(submission_id: str) -> tuple[list[dict[str, Any]], int]:
     submissions = load_submissions()
     for index, submission in enumerate(submissions):
@@ -1148,6 +1380,7 @@ def submit_questionnaire(payload: QuestionnaireSubmission) -> dict[str, Any]:
         "id": datetime.now().strftime("%Y%m%d%H%M%S%f"),
         "created_at": datetime.now().isoformat(),
         "questionnaire": payload.model_dump(),
+        "generation": default_generation_state(),
     }
     submissions = load_submissions()
     submissions.append(submission)
@@ -1173,6 +1406,47 @@ def get_submission(submission_id: str) -> dict[str, Any]:
     return {"status": "success", "item": submissions[index]}
 
 
+@app.get("/api/submissions/{submission_id}/generation-status")
+def get_generation_status(submission_id: str) -> dict[str, Any]:
+    submissions, index = get_submission_or_404(submission_id)
+    submission = submissions[index]
+    generation = submission.get("generation")
+    if not isinstance(generation, dict):
+        generation = default_generation_state()
+    return {
+        "status": "success",
+        "submissionId": submission_id,
+        "generation": generation,
+        "hasProgram": is_program_actual(submission.get("program")),
+    }
+
+
+@app.post("/api/submissions/{submission_id}/generate-program/start")
+def start_generate_program(submission_id: str) -> dict[str, Any]:
+    submissions, index = get_submission_or_404(submission_id)
+    submission = submissions[index]
+    if is_program_actual(submission.get("program")):
+        save_generation_state(submission_id, status="ready", stage="final_assembly", message="Программа уже готова")
+        submissions, index = get_submission_or_404(submission_id)
+        return {
+            "status": "success",
+            "submissionId": submission_id,
+            "generation": submissions[index]["generation"],
+            "cached": True,
+            "program": submissions[index]["program"],
+        }
+
+    save_generation_state(submission_id, status="queued", stage="queued", message="Ставим генерацию в работу")
+    start_generation_job(submission_id)
+    submissions, index = get_submission_or_404(submission_id)
+    return {
+        "status": "accepted",
+        "submissionId": submission_id,
+        "generation": submissions[index]["generation"],
+        "cached": False,
+    }
+
+
 @app.post("/api/submissions/{submission_id}/generate-program")
 def generate_program(submission_id: str) -> dict[str, Any]:
     submissions, index = get_submission_or_404(submission_id)
@@ -1186,11 +1460,19 @@ def generate_program(submission_id: str) -> dict[str, Any]:
         }
 
     try:
-        program = generate_agent_program(submission["questionnaire"])
+        save_generation_state(submission_id, status="running", stage="scenarist_director_critic", message="Генерируем программу")
+        program = generate_agent_program_fast(submission["questionnaire"])
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Ошибка генерации программы: {error}") from error
 
     submissions[index]["program"] = program
+    submissions[index]["generation"] = {
+        "status": "ready",
+        "stage": "final_assembly",
+        "message": "Программа готова",
+        "error": "",
+        "updated_at": datetime.now().isoformat(),
+    }
     save_submissions(submissions)
     return {"status": "success", "submissionId": submission_id, "program": program, "cached": False}
 
@@ -1203,9 +1485,10 @@ def export_docx(submission_id: str) -> StreamingResponse:
     program = submission.get("program")
     if not is_program_actual(program):
         try:
-            program = generate_agent_program(submission["questionnaire"])
-            submissions[index]["program"] = program
-            save_submissions(submissions)
+            start_generation_job(submission_id)
+            raise HTTPException(status_code=409, detail="Программа еще формируется. Дождитесь завершения генерации и попробуйте скачать файл снова.")
+        except HTTPException:
+            raise
         except Exception as error:
             raise HTTPException(status_code=500, detail=f"Ошибка генерации перед экспортом: {error}") from error
 
