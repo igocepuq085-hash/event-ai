@@ -29,6 +29,7 @@ PROGRAM_SCHEMA_VERSION = 4
 EVENT_AI_MODE = os.getenv("EVENT_AI_MODE", "premium").strip().lower()
 AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4" if EVENT_AI_MODE == "premium" else "gpt-5.4-mini")
 AI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "medium" if EVENT_AI_MODE == "premium" else "low").strip()
+STRICT_AI_ONLY = os.getenv("STRICT_AI_ONLY", "true" if EVENT_AI_MODE == "premium" else "false").strip().lower() == "true"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 FRONTEND_ORIGINS = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000")
 RAILWAY_VOLUME_MOUNT_PATH = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
@@ -1423,6 +1424,19 @@ def normalize_program(program: dict[str, Any], questionnaire: dict[str, Any]) ->
     return program
 
 
+def annotate_program_source(program: dict[str, Any], *, source: str, note: str = "") -> dict[str, Any]:
+    program["_generation_meta"] = {
+        "source": source,
+        "mode": EVENT_AI_MODE,
+        "model": AI_MODEL,
+        "reasoning_effort": AI_REASONING_EFFORT,
+        "strict_ai_only": STRICT_AI_ONLY,
+        "note": note,
+        "generated_at": datetime.now().isoformat(),
+    }
+    return program
+
+
 def parse_json_response(raw_text: str) -> dict[str, Any]:
     try:
         return json.loads(raw_text)
@@ -1462,7 +1476,13 @@ def generate_agent_program(questionnaire: dict[str, Any]) -> dict[str, Any]:
     fallback_program = build_target_program(questionnaire)
     fallback_program["_schema_version"] = PROGRAM_SCHEMA_VERSION
     if client is None:
-        return fallback_program
+        if STRICT_AI_ONLY:
+            raise RuntimeError("OPENAI_API_KEY не настроен или OpenAI клиент недоступен. Premium-режим не будет подменять результат шаблонным fallback.")
+        return annotate_program_source(
+            fallback_program,
+            source="fallback",
+            note="OpenAI client unavailable; returned fallback program.",
+        )
 
     try:
         response = client.responses.create(
@@ -1485,16 +1505,28 @@ def generate_agent_program(questionnaire: dict[str, Any]) -> dict[str, Any]:
         program = parse_json_response(raw_text)
         program = normalize_program(program, questionnaire)
         program["_schema_version"] = PROGRAM_SCHEMA_VERSION
-        return program
-    except Exception:
-        return fallback_program
+        return annotate_program_source(program, source="openai", note="Program generated through OpenAI Responses API.")
+    except Exception as error:
+        if STRICT_AI_ONLY:
+            raise RuntimeError(f"OpenAI генерация не сработала: {error}")
+        return annotate_program_source(
+            fallback_program,
+            source="fallback",
+            note=f"OpenAI generation failed; fallback returned: {error}",
+        )
 
 
 def generate_agent_program_fast(questionnaire: dict[str, Any]) -> dict[str, Any]:
     fallback_program = build_target_program(questionnaire)
     fallback_program["_schema_version"] = PROGRAM_SCHEMA_VERSION
     if client is None:
-        return fallback_program
+        if STRICT_AI_ONLY:
+            raise RuntimeError("OPENAI_API_KEY не настроен или OpenAI клиент недоступен. Premium-режим не будет подменять результат шаблонным fallback.")
+        return annotate_program_source(
+            fallback_program,
+            source="fallback",
+            note="OpenAI client unavailable; returned fallback program.",
+        )
 
     try:
         response = client.responses.create(
@@ -1509,9 +1541,15 @@ def generate_agent_program_fast(questionnaire: dict[str, Any]) -> dict[str, Any]
         program = parse_json_response(raw_text)
         program = normalize_program(program, questionnaire)
         program["_schema_version"] = PROGRAM_SCHEMA_VERSION
-        return program
-    except Exception:
-        return fallback_program
+        return annotate_program_source(program, source="openai", note="Program generated through OpenAI Responses API.")
+    except Exception as error:
+        if STRICT_AI_ONLY:
+            raise RuntimeError(f"OpenAI генерация не сработала: {error}")
+        return annotate_program_source(
+            fallback_program,
+            source="fallback",
+            note=f"OpenAI generation failed; fallback returned: {error}",
+        )
 
 
 def safe_filename(value: str) -> str:
@@ -1817,15 +1855,25 @@ def root() -> dict[str, Any]:
         "message": "Event AI backend is running",
         "data_path": str(SUBMISSIONS_FILE),
         "using_railway_volume": bool(RAILWAY_VOLUME_MOUNT_PATH),
+        "mode": EVENT_AI_MODE,
         "model": AI_MODEL,
+        "reasoning_effort": AI_REASONING_EFFORT,
+        "strict_ai_only": STRICT_AI_ONLY,
         "openai_enabled": bool(client),
         "supported_event_types": sorted(SUPPORTED_EVENT_TYPES),
     }
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "healthy"}
+def health() -> dict[str, Any]:
+    return {
+        "status": "healthy",
+        "mode": EVENT_AI_MODE,
+        "model": AI_MODEL,
+        "reasoning_effort": AI_REASONING_EFFORT,
+        "strict_ai_only": STRICT_AI_ONLY,
+        "openai_enabled": bool(client),
+    }
 
 
 @app.post("/api/questionnaire")
