@@ -12,8 +12,10 @@ export type Submission = {
   generation?: {
     status: string;
     stage?: string;
+    percent?: number;
     message?: string;
     error?: string;
+    job_id?: string;
     updated_at?: string;
   };
 };

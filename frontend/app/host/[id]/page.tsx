@@ -9,8 +9,10 @@ import { AppShell } from "@/components/shell";
 type GenerationState = {
   status: string;
   stage?: string;
+  percent?: number;
   message?: string;
   error?: string;
+  job_id?: string;
   updated_at?: string;
 };
 
@@ -22,12 +24,12 @@ type GenerationResponse = {
 
 function getStageLabel(stage?: string) {
   switch (stage) {
-    case "analyst":
-      return "Аналитик";
-    case "trend_analyst":
-      return "Trend analyst";
-    case "scenarist_director_critic":
-      return "Сценарист / режиссер / критик";
+    case "dossier":
+      return "Creative dossier";
+    case "writer":
+      return "Main writer";
+    case "polish":
+      return "Polish";
     case "final_assembly":
       return "Финальная сборка";
     case "queued":
@@ -142,7 +144,16 @@ export default function HostDetailPage() {
         {error ? <div className="rounded-[24px] border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">{error}</div> : null}
         {generation.status !== "idle" ? (
           <div className="rounded-[24px] border border-[var(--border)] bg-white/80 px-5 py-4 text-sm text-stone-700">
-            <div className="font-medium text-stone-900">Статус генерации: {getStageLabel(generation.stage || generation.status)}</div>
+            <div className="flex items-center justify-between gap-4 font-medium text-stone-900">
+              <span>Статус генерации: {getStageLabel(generation.stage || generation.status)}</span>
+              <span>{generation.percent ?? 0}%</span>
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-stone-200">
+              <div
+                className="h-full rounded-full bg-[var(--accent)] transition-all duration-500"
+                style={{ width: `${generation.percent ?? 0}%` }}
+              />
+            </div>
             <div className="mt-1">{generation.error || generation.message || "Генерация запущена."}</div>
           </div>
         ) : null}

@@ -1570,6 +1570,88 @@ def build_compact_generation_user_prompt(questionnaire: dict[str, Any]) -> str:
     )
 
 
+def build_dossier_system_prompt() -> str:
+    return """
+Ты — сценарист-драматург и креативный стратег event-проекта.
+Твоя задача: не писать финальный сценарий, а выделить драматургическое ядро пары и вечера.
+
+Верни только JSON со структурой:
+- central_metaphor
+- image_dictionary
+- unique_hooks
+- forbidden_lexicon
+- sacred_tracks
+- dj_arc
+- host_tone
+- creative_risks
+- writing_thesis
+
+Правила:
+- никакого канцелярита
+- не пересказывай анкету подряд
+- ищи 1 центральную метафору и 2-4 поддерживающих образа
+- используй detail -> meaning -> stage delivery
+- если есть музыкальные предпочтения, вытащи sacred tracks
+"""
+
+
+def build_dossier_user_prompt(questionnaire: dict[str, Any]) -> str:
+    profile = json.dumps(build_personalization_brief(questionnaire), ensure_ascii=False, indent=2)
+    trend_bank = json.dumps(build_trend_bank(questionnaire), ensure_ascii=False, indent=2)
+    style_bank = json.dumps(build_style_bank(questionnaire), ensure_ascii=False, indent=2)
+    dramaturgy_bank = json.dumps(build_dramaturgy_bank(questionnaire), ensure_ascii=False, indent=2)
+    return (
+        "Анкета:\n"
+        f"{build_questionnaire_context(questionnaire)}\n\n"
+        "Personalization brief:\n"
+        f"{profile}\n\n"
+        "Trend-bank:\n"
+        f"{trend_bank}\n\n"
+        "Style-bank:\n"
+        f"{style_bank}\n\n"
+        "Dramaturgy-bank:\n"
+        f"{dramaturgy_bank}\n\n"
+        "Собери creative dossier для этой пары и этого вечера. Верни только JSON."
+    )
+
+
+def build_writer_user_prompt(questionnaire: dict[str, Any], dossier: dict[str, Any]) -> str:
+    return (
+        f"{build_generation_user_prompt(questionnaire)}\n\n"
+        "Creative dossier:\n"
+        f"{json.dumps(dossier, ensure_ascii=False, indent=2)}\n\n"
+        "Теперь напиши финальный рабочий JSON-сценарий, используя dossier как обязательное драматургическое ядро."
+    )
+
+
+def build_polish_system_prompt() -> str:
+    return """
+Ты — финальный редактор и script doctor.
+Твоя задача: не переписывать все с нуля, а улучшить уже собранный сценарий.
+
+Верни только JSON той же структуры.
+
+Что улучшить:
+- убрать канцелярит и шаблонные куски
+- усилить личные детали пары
+- проверить, что DJ guidance реально привязан к предпочтениям клиента
+- сделать тексты ведущего более пригодными к живому произнесению
+- сохранить структуру и прикладность документа
+"""
+
+
+def build_polish_user_prompt(questionnaire: dict[str, Any], dossier: dict[str, Any], program: dict[str, Any]) -> str:
+    return (
+        "Анкета:\n"
+        f"{build_questionnaire_context(questionnaire)}\n\n"
+        "Creative dossier:\n"
+        f"{json.dumps(dossier, ensure_ascii=False, indent=2)}\n\n"
+        "Текущий сценарий:\n"
+        f"{json.dumps(program, ensure_ascii=False, indent=2)}\n\n"
+        "Отредактируй сценарий как финальный script doctor и верни только улучшенный JSON."
+    )
+
+
 def normalize_program(program: dict[str, Any], questionnaire: dict[str, Any]) -> dict[str, Any]:
     fallback = build_target_program(questionnaire)
     for key, value in fallback.items():
@@ -1607,6 +1689,15 @@ def annotate_program_source(program: dict[str, Any], *, source: str, note: str =
         "generated_at": datetime.now().isoformat(),
     }
     return program
+
+
+def annotate_dossier(dossier: dict[str, Any]) -> dict[str, Any]:
+    dossier["_meta"] = {
+        "mode": EVENT_AI_MODE,
+        "model": AI_MODEL,
+        "generated_at": datetime.now().isoformat(),
+    }
+    return dossier
 
 
 def is_timeout_error(error: Exception) -> bool:
@@ -1649,6 +1740,36 @@ def request_program_from_openai(*, system_prompt: str, user_prompt: str, model: 
     if last_error is not None:
         raise RuntimeError(f"OpenAI upstream error after retries: {last_error}")
     raise RuntimeError("OpenAI request failed without explicit error")
+
+
+def generate_creative_dossier(questionnaire: dict[str, Any]) -> dict[str, Any]:
+    dossier = request_program_from_openai(
+        system_prompt=build_dossier_system_prompt(),
+        user_prompt=build_dossier_user_prompt(questionnaire),
+        model=AI_MODEL,
+        reasoning_effort=AI_REASONING_EFFORT,
+    )
+    return annotate_dossier(as_dict(dossier))
+
+
+def write_program_from_dossier(questionnaire: dict[str, Any], dossier: dict[str, Any]) -> dict[str, Any]:
+    program = request_program_from_openai(
+        system_prompt=build_stage_system_prompt(),
+        user_prompt=build_writer_user_prompt(questionnaire, dossier),
+        model=AI_MODEL,
+        reasoning_effort=AI_REASONING_EFFORT,
+    )
+    return normalize_program(program, questionnaire)
+
+
+def polish_program(questionnaire: dict[str, Any], dossier: dict[str, Any], program: dict[str, Any]) -> dict[str, Any]:
+    polished = request_program_from_openai(
+        system_prompt=build_polish_system_prompt(),
+        user_prompt=build_polish_user_prompt(questionnaire, dossier, program),
+        model=OPENAI_TIMEOUT_RETRY_MODEL or AI_MODEL,
+        reasoning_effort=OPENAI_TIMEOUT_RETRY_REASONING or AI_REASONING_EFFORT,
+    )
+    return normalize_program(polished, questionnaire)
 
 
 def parse_json_response(raw_text: str) -> dict[str, Any]:
@@ -2011,6 +2132,7 @@ def default_generation_state() -> dict[str, Any]:
     return {
         "status": "idle",
         "stage": "",
+        "percent": 0,
         "message": "",
         "error": "",
         "job_id": "",
@@ -2023,6 +2145,7 @@ def save_generation_state(
     *,
     status: str,
     stage: str = "",
+    percent: int | None = None,
     message: str = "",
     error: str = "",
     program: dict[str, Any] | None = None,
@@ -2048,6 +2171,8 @@ def save_generation_state(
                 "updated_at": datetime.now().isoformat(),
             }
         )
+        if percent is not None:
+            generation["percent"] = max(0, min(100, int(percent)))
         if job_id is not None:
             generation["job_id"] = job_id
         submissions[index]["generation"] = generation
@@ -2061,27 +2186,25 @@ def run_generation_job(submission_id: str, job_id: str) -> None:
     try:
         submissions, index = get_submission_or_404(submission_id)
         questionnaire = submissions[index]["questionnaire"]
-        save_generation_state(submission_id, status="running", stage="analyst", message="Собираем драматургическое ядро анкеты", expected_job_id=job_id)
-        _ = build_event_analyst_brief(questionnaire)
-        save_generation_state(submission_id, status="running", stage="trend_analyst", message="Проверяем современную event-логику", expected_job_id=job_id)
-        _ = build_trend_analyst_brief(questionnaire)
         save_generation_state(
             submission_id,
             status="running",
-            stage="scenarist_director_critic",
-            message="Генерируем сценарий, режиссуру и финальную сборку",
+            stage="dossier",
+            percent=10,
+            message="Ищем золотые зацепки пары, центральную метафору и sacred tracks",
             expected_job_id=job_id,
         )
         with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(generate_agent_program_fast, questionnaire)
+            future = executor.submit(generate_creative_dossier, questionnaire)
             try:
-                program = future.result(timeout=GENERATION_WATCHDOG_SECONDS)
+                dossier = future.result(timeout=GENERATION_WATCHDOG_SECONDS)
             except FutureTimeoutError:
                 future.cancel()
                 save_generation_state(
                     submission_id,
                     status="failed",
                     stage="failed",
+                    percent=100,
                     error=f"Генерация превысила лимит {int(GENERATION_WATCHDOG_SECONDS)} сек и была остановлена watchdog.",
                     message="Генерация заняла слишком много времени. Попробуйте еще раз.",
                     job_id=f"expired:{job_id}",
@@ -2090,8 +2213,50 @@ def run_generation_job(submission_id: str, job_id: str) -> None:
                 return
         save_generation_state(
             submission_id,
+            status="running",
+            stage="writer",
+            percent=40,
+            message="Пишем основной сценарий и музыкальную драматургию по creative dossier",
+            expected_job_id=job_id,
+        )
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(write_program_from_dossier, questionnaire, dossier)
+            try:
+                draft_program = future.result(timeout=GENERATION_WATCHDOG_SECONDS)
+            except FutureTimeoutError:
+                future.cancel()
+                save_generation_state(
+                    submission_id,
+                    status="failed",
+                    stage="failed",
+                    percent=100,
+                    error=f"Writer-этап превысил лимит {int(GENERATION_WATCHDOG_SECONDS)} сек и был остановлен watchdog.",
+                    message="Основной writer-этап занял слишком много времени. Попробуйте еще раз.",
+                    job_id=f"expired:{job_id}",
+                    expected_job_id=job_id,
+                )
+                return
+        save_generation_state(
+            submission_id,
+            status="running",
+            stage="polish",
+            percent=78,
+            message="Убираем канцелярит, усиливаем образы и шлифуем DJ sheet",
+            expected_job_id=job_id,
+        )
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(polish_program, questionnaire, dossier, draft_program)
+            try:
+                program = future.result(timeout=GENERATION_WATCHDOG_SECONDS)
+            except FutureTimeoutError:
+                future.cancel()
+                program = draft_program
+        program["_creative_dossier"] = dossier
+        save_generation_state(
+            submission_id,
             status="ready",
             stage="final_assembly",
+            percent=100,
             message="Программа готова",
             program=program,
             expected_job_id=job_id,
@@ -2101,6 +2266,7 @@ def run_generation_job(submission_id: str, job_id: str) -> None:
             submission_id,
             status="failed",
             stage="failed",
+            percent=100,
             error=str(error),
             message="Генерация завершилась с ошибкой",
             job_id=f"failed:{job_id}",
@@ -2121,6 +2287,7 @@ def start_generation_job(submission_id: str) -> None:
             submission_id,
             status="queued",
             stage="queued",
+            percent=3,
             message="Задача поставлена в очередь генерации",
             error="",
             job_id=job_id,
@@ -2224,7 +2391,7 @@ def start_generate_program(submission_id: str) -> dict[str, Any]:
     submissions, index = get_submission_or_404(submission_id)
     submission = submissions[index]
     if is_program_actual(submission.get("program")):
-        save_generation_state(submission_id, status="ready", stage="final_assembly", message="Программа уже готова")
+        save_generation_state(submission_id, status="ready", stage="final_assembly", percent=100, message="Программа уже готова")
         submissions, index = get_submission_or_404(submission_id)
         return {
             "status": "success",
@@ -2234,7 +2401,7 @@ def start_generate_program(submission_id: str) -> dict[str, Any]:
             "program": submissions[index]["program"],
         }
 
-    save_generation_state(submission_id, status="queued", stage="queued", message="Ставим генерацию в работу")
+    save_generation_state(submission_id, status="queued", stage="queued", percent=3, message="Ставим генерацию в работу")
     start_generation_job(submission_id)
     submissions, index = get_submission_or_404(submission_id)
     return {
@@ -2258,8 +2425,13 @@ def generate_program(submission_id: str) -> dict[str, Any]:
         }
 
     try:
-        save_generation_state(submission_id, status="running", stage="scenarist_director_critic", message="Генерируем программу")
-        program = generate_agent_program_fast(submission["questionnaire"])
+        save_generation_state(submission_id, status="running", stage="dossier", percent=10, message="Собираем creative dossier")
+        dossier = generate_creative_dossier(submission["questionnaire"])
+        save_generation_state(submission_id, status="running", stage="writer", percent=40, message="Пишем основной сценарий")
+        draft_program = write_program_from_dossier(submission["questionnaire"], dossier)
+        save_generation_state(submission_id, status="running", stage="polish", percent=78, message="Шлифуем тексты и DJ sheet")
+        program = polish_program(submission["questionnaire"], dossier, draft_program)
+        program["_creative_dossier"] = dossier
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Ошибка генерации программы: {error}") from error
 
@@ -2267,6 +2439,7 @@ def generate_program(submission_id: str) -> dict[str, Any]:
     submissions[index]["generation"] = {
         "status": "ready",
         "stage": "final_assembly",
+        "percent": 100,
         "message": "Программа готова",
         "error": "",
         "updated_at": datetime.now().isoformat(),
