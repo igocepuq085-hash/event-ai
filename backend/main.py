@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from threading import Lock, Thread
 from time import sleep
 from typing import Any
+from uuid import uuid4
 
 from docx import Document
 from dotenv import load_dotenv
@@ -36,6 +38,7 @@ OPENAI_TIMEOUT_RETRY_MODEL = os.getenv("OPENAI_TIMEOUT_RETRY_MODEL", "gpt-5.4-mi
 OPENAI_TIMEOUT_RETRY_REASONING = os.getenv("OPENAI_TIMEOUT_RETRY_REASONING", "low" if EVENT_AI_MODE == "premium" else AI_REASONING_EFFORT).strip()
 OPENAI_GATEWAY_RETRIES = int(os.getenv("OPENAI_GATEWAY_RETRIES", "3"))
 OPENAI_GATEWAY_RETRY_DELAY_SECONDS = float(os.getenv("OPENAI_GATEWAY_RETRY_DELAY_SECONDS", "2.5"))
+GENERATION_WATCHDOG_SECONDS = float(os.getenv("GENERATION_WATCHDOG_SECONDS", "420"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 FRONTEND_ORIGINS = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000")
 RAILWAY_VOLUME_MOUNT_PATH = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
@@ -50,7 +53,7 @@ SUBMISSIONS_FILE = DATA_DIR / "submissions.json"
 GENERATION_THREAD_LOCK = Lock()
 GENERATION_THREADS: dict[str, Thread] = {}
 
-client = OpenAI(api_key=OPENAI_API_KEY, timeout=OPENAI_TIMEOUT_SECONDS) if OpenAI and OPENAI_API_KEY else None
+client = OpenAI(api_key=OPENAI_API_KEY, timeout=OPENAI_TIMEOUT_SECONDS, max_retries=1) if OpenAI and OPENAI_API_KEY else None
 
 app = FastAPI(title="Event AI Backend", version="1.1.0")
 app.add_middleware(
@@ -2010,6 +2013,7 @@ def default_generation_state() -> dict[str, Any]:
         "stage": "",
         "message": "",
         "error": "",
+        "job_id": "",
         "updated_at": datetime.now().isoformat(),
     }
 
@@ -2022,6 +2026,8 @@ def save_generation_state(
     message: str = "",
     error: str = "",
     program: dict[str, Any] | None = None,
+    job_id: str | None = None,
+    expected_job_id: str | None = None,
 ) -> None:
     submissions = load_submissions()
     for index, submission in enumerate(submissions):
@@ -2030,6 +2036,9 @@ def save_generation_state(
         generation = submission.get("generation")
         if not isinstance(generation, dict):
             generation = default_generation_state()
+        current_job_id = str(generation.get("job_id", "") or "")
+        if expected_job_id is not None and current_job_id != expected_job_id:
+            return
         generation.update(
             {
                 "status": status,
@@ -2039,6 +2048,8 @@ def save_generation_state(
                 "updated_at": datetime.now().isoformat(),
             }
         )
+        if job_id is not None:
+            generation["job_id"] = job_id
         submissions[index]["generation"] = generation
         if program is not None:
             submissions[index]["program"] = program
@@ -2046,19 +2057,55 @@ def save_generation_state(
         return
 
 
-def run_generation_job(submission_id: str) -> None:
+def run_generation_job(submission_id: str, job_id: str) -> None:
     try:
         submissions, index = get_submission_or_404(submission_id)
         questionnaire = submissions[index]["questionnaire"]
-        save_generation_state(submission_id, status="running", stage="analyst", message="Собираем драматургическое ядро анкеты")
+        save_generation_state(submission_id, status="running", stage="analyst", message="Собираем драматургическое ядро анкеты", expected_job_id=job_id)
         _ = build_event_analyst_brief(questionnaire)
-        save_generation_state(submission_id, status="running", stage="trend_analyst", message="Проверяем современную event-логику")
+        save_generation_state(submission_id, status="running", stage="trend_analyst", message="Проверяем современную event-логику", expected_job_id=job_id)
         _ = build_trend_analyst_brief(questionnaire)
-        save_generation_state(submission_id, status="running", stage="scenarist_director_critic", message="Генерируем сценарий, режиссуру и финальную сборку")
-        program = generate_agent_program_fast(questionnaire)
-        save_generation_state(submission_id, status="ready", stage="final_assembly", message="Программа готова", program=program)
+        save_generation_state(
+            submission_id,
+            status="running",
+            stage="scenarist_director_critic",
+            message="Генерируем сценарий, режиссуру и финальную сборку",
+            expected_job_id=job_id,
+        )
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(generate_agent_program_fast, questionnaire)
+            try:
+                program = future.result(timeout=GENERATION_WATCHDOG_SECONDS)
+            except FutureTimeoutError:
+                future.cancel()
+                save_generation_state(
+                    submission_id,
+                    status="failed",
+                    stage="failed",
+                    error=f"Генерация превысила лимит {int(GENERATION_WATCHDOG_SECONDS)} сек и была остановлена watchdog.",
+                    message="Генерация заняла слишком много времени. Попробуйте еще раз.",
+                    job_id=f"expired:{job_id}",
+                    expected_job_id=job_id,
+                )
+                return
+        save_generation_state(
+            submission_id,
+            status="ready",
+            stage="final_assembly",
+            message="Программа готова",
+            program=program,
+            expected_job_id=job_id,
+        )
     except Exception as error:
-        save_generation_state(submission_id, status="failed", stage="failed", error=str(error), message="Генерация завершилась с ошибкой")
+        save_generation_state(
+            submission_id,
+            status="failed",
+            stage="failed",
+            error=str(error),
+            message="Генерация завершилась с ошибкой",
+            job_id=f"failed:{job_id}",
+            expected_job_id=job_id,
+        )
     finally:
         with GENERATION_THREAD_LOCK:
             GENERATION_THREADS.pop(submission_id, None)
@@ -2069,7 +2116,16 @@ def start_generation_job(submission_id: str) -> None:
         existing = GENERATION_THREADS.get(submission_id)
         if existing and existing.is_alive():
             return
-        worker = Thread(target=run_generation_job, args=(submission_id,), daemon=True)
+        job_id = uuid4().hex
+        save_generation_state(
+            submission_id,
+            status="queued",
+            stage="queued",
+            message="Задача поставлена в очередь генерации",
+            error="",
+            job_id=job_id,
+        )
+        worker = Thread(target=run_generation_job, args=(submission_id, job_id), daemon=True)
         GENERATION_THREADS[submission_id] = worker
         worker.start()
 
@@ -2095,6 +2151,7 @@ def root() -> dict[str, Any]:
         "strict_ai_only": STRICT_AI_ONLY,
         "openai_timeout_seconds": OPENAI_TIMEOUT_SECONDS,
         "openai_gateway_retries": OPENAI_GATEWAY_RETRIES,
+        "generation_watchdog_seconds": GENERATION_WATCHDOG_SECONDS,
         "openai_enabled": bool(client),
         "supported_event_types": sorted(SUPPORTED_EVENT_TYPES),
     }
@@ -2110,6 +2167,7 @@ def health() -> dict[str, Any]:
         "strict_ai_only": STRICT_AI_ONLY,
         "openai_timeout_seconds": OPENAI_TIMEOUT_SECONDS,
         "openai_gateway_retries": OPENAI_GATEWAY_RETRIES,
+        "generation_watchdog_seconds": GENERATION_WATCHDOG_SECONDS,
         "openai_enabled": bool(client),
     }
 
