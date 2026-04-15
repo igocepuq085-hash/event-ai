@@ -30,6 +30,9 @@ EVENT_AI_MODE = os.getenv("EVENT_AI_MODE", "premium").strip().lower()
 AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4" if EVENT_AI_MODE == "premium" else "gpt-5.4-mini")
 AI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "medium" if EVENT_AI_MODE == "premium" else "low").strip()
 STRICT_AI_ONLY = os.getenv("STRICT_AI_ONLY", "true" if EVENT_AI_MODE == "premium" else "false").strip().lower() == "true"
+OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "180" if EVENT_AI_MODE == "premium" else "60"))
+OPENAI_TIMEOUT_RETRY_MODEL = os.getenv("OPENAI_TIMEOUT_RETRY_MODEL", "gpt-5.4-mini" if EVENT_AI_MODE == "premium" else "").strip()
+OPENAI_TIMEOUT_RETRY_REASONING = os.getenv("OPENAI_TIMEOUT_RETRY_REASONING", "low" if EVENT_AI_MODE == "premium" else AI_REASONING_EFFORT).strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 FRONTEND_ORIGINS = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000")
 RAILWAY_VOLUME_MOUNT_PATH = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
@@ -44,7 +47,7 @@ SUBMISSIONS_FILE = DATA_DIR / "submissions.json"
 GENERATION_THREAD_LOCK = Lock()
 GENERATION_THREADS: dict[str, Thread] = {}
 
-client = OpenAI(api_key=OPENAI_API_KEY, timeout=60.0) if OpenAI and OPENAI_API_KEY else None
+client = OpenAI(api_key=OPENAI_API_KEY, timeout=OPENAI_TIMEOUT_SECONDS) if OpenAI and OPENAI_API_KEY else None
 
 app = FastAPI(title="Event AI Backend", version="1.1.0")
 app.add_middleware(
@@ -1398,6 +1401,40 @@ def build_generation_user_prompt(questionnaire: dict[str, Any]) -> str:
     )
 
 
+def build_compact_generation_user_prompt(questionnaire: dict[str, Any]) -> str:
+    profile = build_personalization_brief(questionnaire)
+    trend_bank = build_trend_bank(questionnaire)
+    style_bank = build_style_bank(questionnaire)
+    return (
+        f"Тип мероприятия: {questionnaire['eventType']}\n\n"
+        "Анкета:\n"
+        f"{build_questionnaire_context(questionnaire)}\n\n"
+        "Краткое креативное ядро:\n"
+        f"- Герои: {profile['heroes']}\n"
+        f"- История: {profile['love_story']}\n"
+        f"- Предложение / ключевой поворот: {profile['proposal_story']}\n"
+        f"- Ценности: {', '.join(profile['values'][:4])}\n"
+        f"- Внутренний язык: {profile['nicknames'] or 'использовать уместные личные обращения'}\n"
+        f"- Внутренние шутки: {profile['inside_jokes'] or 'не выдумывать шутки без фактуры'}\n"
+        f"- Важные даты: {', '.join(profile['important_dates'][:4]) or 'встроить реальные точки истории пары'}\n"
+        f"- Любимая музыка: {', '.join(profile['music_likes'][:6]) or 'использовать музыкальные предпочтения клиента'}\n\n"
+        "Trend-bank:\n"
+        f"- Год события: {trend_bank['event_year']}\n"
+        f"- Сезон: {trend_bank['season']}\n"
+        f"- Сезонная логика: {trend_bank['seasonal_logic']}\n"
+        f"- Host direction: {'; '.join(trend_bank['host_market_direction'])}\n"
+        f"- DJ direction: {'; '.join(trend_bank['dj_market_direction'])}\n\n"
+        "Style-bank:\n"
+        f"- Voice direction: {style_bank['voice_direction']}\n"
+        f"- Must sound like: {'; '.join(style_bank['must_sound_like'])}\n"
+        f"- Must not sound like: {'; '.join(style_bank['must_not_sound_like'])}\n\n"
+        "Верни только валидный JSON. "
+        "Нужен премиальный сценарий, а не пересказ анкеты. "
+        "Пиши как креативный помощник и режиссер, а не как шаблонный генератор. "
+        "Собери реальный DJ sheet по точкам вечера и обязательно встрои любимые треки клиента в конкретные места сета."
+    )
+
+
 def normalize_program(program: dict[str, Any], questionnaire: dict[str, Any]) -> dict[str, Any]:
     fallback = build_target_program(questionnaire)
     for key, value in fallback.items():
@@ -1435,6 +1472,26 @@ def annotate_program_source(program: dict[str, Any], *, source: str, note: str =
         "generated_at": datetime.now().isoformat(),
     }
     return program
+
+
+def is_timeout_error(error: Exception) -> bool:
+    text = str(error).lower()
+    return "timed out" in text or "timeout" in text or "time out" in text
+
+
+def request_program_from_openai(*, system_prompt: str, user_prompt: str, model: str, reasoning_effort: str) -> dict[str, Any]:
+    if client is None:
+        raise RuntimeError("OpenAI client unavailable")
+    response = client.responses.create(
+        model=model,
+        reasoning={"effort": reasoning_effort},
+        input=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+    raw_text = response.output_text.strip()
+    return parse_json_response(raw_text)
 
 
 def parse_json_response(raw_text: str) -> dict[str, Any]:
@@ -1485,28 +1542,38 @@ def generate_agent_program(questionnaire: dict[str, Any]) -> dict[str, Any]:
         )
 
     try:
-        response = client.responses.create(
+        program = request_program_from_openai(
+            system_prompt=build_stage_system_prompt(),
+            user_prompt=(
+                f"Тип мероприятия: {questionnaire['eventType']}\n\n"
+                "Анкета:\n"
+                f"{build_questionnaire_context(questionnaire)}\n\n"
+                "Верни только валидный JSON."
+            ),
             model=AI_MODEL,
-            reasoning={"effort": AI_REASONING_EFFORT},
-            input=[
-                {"role": "system", "content": build_stage_system_prompt()},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Тип мероприятия: {questionnaire['eventType']}\n\n"
-                        "Анкета:\n"
-                        f"{build_questionnaire_context(questionnaire)}\n\n"
-                        "Верни только валидный JSON."
-                    ),
-                },
-            ],
+            reasoning_effort=AI_REASONING_EFFORT,
         )
-        raw_text = response.output_text.strip()
-        program = parse_json_response(raw_text)
         program = normalize_program(program, questionnaire)
         program["_schema_version"] = PROGRAM_SCHEMA_VERSION
         return annotate_program_source(program, source="openai", note="Program generated through OpenAI Responses API.")
     except Exception as error:
+        if is_timeout_error(error) and OPENAI_TIMEOUT_RETRY_MODEL:
+            try:
+                program = request_program_from_openai(
+                    system_prompt=build_stage_system_prompt(),
+                    user_prompt=build_compact_generation_user_prompt(questionnaire),
+                    model=OPENAI_TIMEOUT_RETRY_MODEL,
+                    reasoning_effort=OPENAI_TIMEOUT_RETRY_REASONING,
+                )
+                program = normalize_program(program, questionnaire)
+                program["_schema_version"] = PROGRAM_SCHEMA_VERSION
+                return annotate_program_source(
+                    program,
+                    source="openai-retry",
+                    note=f"Primary request timed out; retry succeeded with {OPENAI_TIMEOUT_RETRY_MODEL}.",
+                )
+            except Exception as retry_error:
+                error = retry_error
         if STRICT_AI_ONLY:
             raise RuntimeError(f"OpenAI генерация не сработала: {error}")
         return annotate_program_source(
@@ -1529,20 +1596,33 @@ def generate_agent_program_fast(questionnaire: dict[str, Any]) -> dict[str, Any]
         )
 
     try:
-        response = client.responses.create(
+        program = request_program_from_openai(
+            system_prompt=build_stage_system_prompt(),
+            user_prompt=build_generation_user_prompt(questionnaire),
             model=AI_MODEL,
-            reasoning={"effort": AI_REASONING_EFFORT},
-            input=[
-                {"role": "system", "content": build_stage_system_prompt()},
-                {"role": "user", "content": build_generation_user_prompt(questionnaire)},
-            ],
+            reasoning_effort=AI_REASONING_EFFORT,
         )
-        raw_text = response.output_text.strip()
-        program = parse_json_response(raw_text)
         program = normalize_program(program, questionnaire)
         program["_schema_version"] = PROGRAM_SCHEMA_VERSION
         return annotate_program_source(program, source="openai", note="Program generated through OpenAI Responses API.")
     except Exception as error:
+        if is_timeout_error(error) and OPENAI_TIMEOUT_RETRY_MODEL:
+            try:
+                program = request_program_from_openai(
+                    system_prompt=build_stage_system_prompt(),
+                    user_prompt=build_compact_generation_user_prompt(questionnaire),
+                    model=OPENAI_TIMEOUT_RETRY_MODEL,
+                    reasoning_effort=OPENAI_TIMEOUT_RETRY_REASONING,
+                )
+                program = normalize_program(program, questionnaire)
+                program["_schema_version"] = PROGRAM_SCHEMA_VERSION
+                return annotate_program_source(
+                    program,
+                    source="openai-retry",
+                    note=f"Primary request timed out; retry succeeded with {OPENAI_TIMEOUT_RETRY_MODEL}.",
+                )
+            except Exception as retry_error:
+                error = retry_error
         if STRICT_AI_ONLY:
             raise RuntimeError(f"OpenAI генерация не сработала: {error}")
         return annotate_program_source(
