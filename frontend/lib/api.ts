@@ -1,4 +1,8 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const CLIENT_API_PREFIX = "/api/backend";
+const SERVER_API_URL =
+  process.env.BACKEND_API_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://127.0.0.1:8000";
 
 export type Submission = {
   id: string;
@@ -10,7 +14,7 @@ export type Submission = {
 export type QuestionnairePayload = Record<string, string>;
 
 export async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(`${CLIENT_API_PREFIX}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -32,4 +36,4 @@ export async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> 
   return response.json() as Promise<T>;
 }
 
-export { API_URL };
+export { CLIENT_API_PREFIX, SERVER_API_URL };

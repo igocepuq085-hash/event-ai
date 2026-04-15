@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { API_URL, fetchApi, type Submission } from "@/lib/api";
+import { CLIENT_API_PREFIX, fetchApi, type Submission } from "@/lib/api";
 import { AppShell } from "@/components/shell";
 
 type ProgramResponse = {
@@ -45,7 +45,7 @@ export default function HostDetailPage() {
     });
   };
 
-  const downloadUrl = id ? `${API_URL}/api/submissions/${id}/export-docx` : "#";
+  const downloadUrl = id ? `${CLIENT_API_PREFIX}/api/submissions/${id}/export-docx` : "#";
   const passport = (program?.event_passport as Record<string, unknown> | undefined) || null;
   const timeline = (program?.scenario_timeline as Record<string, unknown>[] | undefined) || [];
   const hostCommands = (program?.key_host_commands as string[] | undefined) || [];

@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { API_URL, type Submission } from "@/lib/api";
+import { SERVER_API_URL, type Submission } from "@/lib/api";
 import { AppShell } from "@/components/shell";
 import { LogoutButton } from "@/components/logout-button";
 
 async function getSubmissions(): Promise<Submission[]> {
-  const response = await fetch(`${API_URL}/api/submissions`, { cache: "no-store" });
+  const response = await fetch(`${SERVER_API_URL}/api/submissions`, { cache: "no-store" });
   if (!response.ok) {
     throw new Error("Не удалось загрузить заявки");
   }
