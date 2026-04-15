@@ -438,6 +438,69 @@ def build_precise_dj_guidance(questionnaire: dict[str, Any], hard_bans: list[str
     }
 
 
+def extract_music_preferences(questionnaire: dict[str, Any]) -> list[str]:
+    return list_from_text(
+        "\n".join(
+            [
+                questionnaire.get("musicLikes", ""),
+                questionnaire.get("references", ""),
+                questionnaire.get("likedFormats", ""),
+                questionnaire.get("jubileeLikedFormats", ""),
+            ]
+        ),
+        [],
+    )
+
+
+def refine_program_payload(program: dict[str, Any], questionnaire: dict[str, Any]) -> dict[str, Any]:
+    preferred_tracks = extract_music_preferences(questionnaire)
+    timeline = as_list(program.get("scenario_timeline"))
+    keep_titles = {
+        "Сбор гостей и тонкий welcome",
+        "Главное открытие вечера",
+        "Первое смысловое ядро",
+        "Семейный и эмоциональный блок",
+        "Сюрприз или специальный акцент",
+        "Танцевальная волна",
+        "Финал и закрытие вечера",
+    }
+    if timeline:
+        filtered = [block for block in timeline if as_dict(block).get("block_title") in keep_titles]
+        if filtered:
+            program["scenario_timeline"] = filtered
+
+    dj = as_dict(program.get("dj_guidance"))
+    if preferred_tracks:
+        chosen = ", ".join(preferred_tracks[:4])
+        dj["overall_music_policy"] = (
+            str(dj.get("overall_music_policy", "")).strip()
+            + f" Обязательно встроить в сет музыкальные предпочтения клиента: {chosen}."
+        ).strip()
+        dj["technical_notes"] = as_list(dj.get("technical_notes")) + [
+            f"Согласованные любимые треки клиента держать как святые точки вечера: {chosen}.",
+            "Если любимый трек медленный, использовать его как эмоциональную точку или красивый переход, а не бросать в случайный блок.",
+        ]
+        if "special_tracks" not in dj:
+            dj["special_tracks"] = preferred_tracks[:6]
+        program["dj_guidance"] = dj
+
+    trend_features = [
+        "Фишка ведущего: собрать 3 короткие голосовые реплики от гостей заранее и вшить их в эмоциональный блок как живой аудио-монтаж.",
+        "Фишка ведущего: использовать micro-story cards — по одной точной истории о паре от близких вместо длинной череды одинаковых поздравлений.",
+        "Фишка ведущего: делать мягкий editorial-style guest spotting — коротко замечать стильные, трогательные и характерные детали гостей без кринжа и давления.",
+        "Фишка ведущего: собирать танцпол через first circle — сначала вывести 6-8 опорных гостей, а не звать в пустоту весь зал.",
+    ]
+    program["key_host_commands"] = as_list(program.get("key_host_commands")) + trend_features
+
+    final_print = as_dict(program.get("final_print_version"))
+    final_print["timeline_short"] = [
+        f"{as_dict(item).get('time_from', '')}-{as_dict(item).get('time_to', '')}: {as_dict(item).get('block_title', '')}"
+        for item in as_list(program.get("scenario_timeline"))
+    ]
+    program["final_print_version"] = final_print
+    return program
+
+
 def build_fallback_program(questionnaire: dict[str, Any]) -> dict[str, Any]:
     event_type = questionnaire["eventType"]
     is_wedding = event_type == "wedding"
@@ -902,12 +965,12 @@ def build_target_program(questionnaire: dict[str, Any]) -> dict[str, Any]:
         "host_focus": ["точность тона", "уважение к людям", "контроль тайминга", "мягкое вовлечение", "сильные образные тексты"],
         "dj_focus": ["музыкальные коридоры", "бережный выход из эмоции", "пошаговый разгон", "чистый финальный акцент"],
     }
-    return program
+    return refine_program_payload(program, questionnaire)
 
 
 def is_program_detailed(program: dict[str, Any]) -> bool:
     timeline = as_list(program.get("scenario_timeline"))
-    if len(timeline) < 8:
+    if len(timeline) < 7:
         return False
     for block in timeline:
         block_data = as_dict(block)
@@ -1098,7 +1161,9 @@ def build_generation_user_prompt(questionnaire: dict[str, Any]) -> str:
         "В каждом host_text должно быть не меньше 10 свежих, небанальных метафор. "
         "Каждый host_text и ключевые поля host_script пиши как готовую прямую речь ведущего от первого лица, а не как рекомендации о том, что ему делать. "
         "DJ guidance должен содержать трековые ориентиры, музыкальную логику, входы, выходы, stop list и rescue-логику. "
-        "Нельзя писать общие слова вроде 'что-то атмосферное' или 'поднять зал'; нужны конкретные артистические и трековые ориентиры."
+        "Нельзя писать общие слова вроде 'что-то атмосферное' или 'поднять зал'; нужны конкретные артистические и трековые ориентиры. "
+        "Если в анкете указаны любимые песни или музыкальные предпочтения, обязательно встрои их в DJ-план как конкретные точки сета. "
+        "Предложи несколько трендовых фишек ведущего, которые реально можно использовать на площадке без кринжа."
     )
 
 
