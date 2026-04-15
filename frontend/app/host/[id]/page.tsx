@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { CLIENT_API_PREFIX, fetchApi, type Submission } from "@/lib/api";
+import { fetchApi, type Submission } from "@/lib/api";
 import { AppShell } from "@/components/shell";
 
 type GenerationState = {
@@ -45,17 +45,23 @@ export default function HostDetailPage() {
   const params = useParams<{ id: string }>();
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [program, setProgram] = useState<Record<string, unknown> | null>(null);
+  const [hasProgram, setHasProgram] = useState(false);
   const [generation, setGeneration] = useState<GenerationState>({ status: "idle" });
   const [error, setError] = useState("");
+  const [isDownloading, setIsDownloading] = useState(false);
   const [isPending, startTransition] = useTransition();
   const id = params.id;
 
   useEffect(() => {
     if (!id) return;
-    fetchApi<{ item: Submission }>(`/api/submissions/${id}`)
-      .then((data) => {
+    Promise.all([
+      fetchApi<{ item: Submission }>(`/api/submissions/${id}`),
+      fetchApi<GenerationResponse>(`/api/submissions/${id}/generation-status`),
+    ])
+      .then(([data, statusData]) => {
         setSubmission(data.item);
-        setGeneration(data.item.generation || { status: "idle" });
+        setGeneration(statusData.generation || data.item.generation || { status: "idle" });
+        setHasProgram(Boolean(statusData.hasProgram));
         if (data.item.program) {
           setProgram(data.item.program);
         }
@@ -73,6 +79,7 @@ export default function HostDetailPage() {
       try {
         const statusData = await fetchApi<GenerationResponse>(`/api/submissions/${id}/generation-status`);
         setGeneration(statusData.generation);
+        setHasProgram(Boolean(statusData.hasProgram));
         if (statusData.hasProgram) {
           const data = await fetchApi<{ item: Submission }>(`/api/submissions/${id}`);
           setSubmission(data.item);
@@ -98,6 +105,7 @@ export default function HostDetailPage() {
       try {
         const data = await fetchApi<GenerationResponse>(`/api/submissions/${id}/generate-program/start`, { method: "POST" });
         setGeneration(data.generation);
+        setHasProgram(Boolean(data.hasProgram));
         if (data.program) {
           setProgram(data.program);
         }
@@ -107,9 +115,55 @@ export default function HostDetailPage() {
     });
   };
 
-  const downloadUrl = id ? `${CLIENT_API_PREFIX}/api/submissions/${id}/export-docx` : "#";
+  const handleDownload = async () => {
+    if (!id || !hasProgram || isDownloading) return;
+    setError("");
+    setIsDownloading(true);
+
+    try {
+      const response = await fetch(`/api/backend/api/submissions/${id}/export-docx`, {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        const contentType = response.headers.get("content-type") || "";
+        let message = `Ошибка скачивания: ${response.status}`;
+
+        if (contentType.includes("application/json")) {
+          const data = (await response.json()) as { detail?: string };
+          message = data.detail || message;
+        } else {
+          const text = await response.text();
+          if (text) {
+            message = text;
+          }
+        }
+
+        throw new Error(message);
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get("content-disposition") || "";
+      const filenameMatch = contentDisposition.match(/filename=\"([^\"]+)\"/i);
+      const filename = filenameMatch?.[1] || `event_ai_${id}.docx`;
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : "Не удалось скачать .docx");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   const isGenerating = isPending || ["queued", "running"].includes(generation.status);
-  const canDownload = generation.status === "ready" && Boolean(program);
+  const canDownload = generation.status === "ready" && hasProgram && Boolean(program);
   const passport = (program?.event_passport as Record<string, unknown> | undefined) || null;
   const timeline = (program?.scenario_timeline as Record<string, unknown>[] | undefined) || [];
   const hostCommands = (program?.key_host_commands as string[] | undefined) || [];
@@ -131,13 +185,14 @@ export default function HostDetailPage() {
             >
               {isGenerating ? "Генерация в работе..." : "Сформировать программу"}
             </button>
-            <a
-              href={downloadUrl}
-              aria-disabled={!canDownload}
+            <button
+              type="button"
+              onClick={handleDownload}
+              disabled={!canDownload || isDownloading}
               className={`rounded-full border border-[var(--border)] bg-white/70 px-5 py-3 text-sm font-semibold text-stone-800 ${canDownload ? "" : "pointer-events-none opacity-50"}`}
             >
               Скачать .docx
-            </a>
+            </button>
           </div>
         </div>
 

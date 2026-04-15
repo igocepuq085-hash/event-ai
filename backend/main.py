@@ -2333,6 +2333,7 @@ def run_generation_job(submission_id: str, job_id: str) -> None:
             except FutureTimeoutError:
                 future.cancel()
                 program = draft_program
+        program["_schema_version"] = PROGRAM_SCHEMA_VERSION
         program["_creative_dossier"] = dossier
         save_generation_state(
             submission_id,
