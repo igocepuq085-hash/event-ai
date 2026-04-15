@@ -38,6 +38,15 @@ export function QuestionnaireForm({ eventType }: { eventType: EventType }) {
 
   const specificFields = eventType === "wedding" ? weddingFields : jubileeFields;
   const requiredFields = [...commonFields, ...specificFields].filter((field) => field.required);
+  const isWedding = eventType === "wedding";
+  const wrapperClass = isWedding
+    ? "border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,240,236,0.86))] shadow-[0_28px_90px_rgba(113,91,80,0.10)]"
+    : "border-white/60 bg-[linear-gradient(180deg,rgba(255,248,241,0.92),rgba(255,233,214,0.88))] shadow-[0_28px_90px_rgba(145,88,42,0.12)]";
+  const badgeClass = isWedding ? "text-stone-500" : "text-amber-700";
+  const title = isWedding ? "Анкета свадьбы" : "Анкета юбилея";
+  const description = isWedding
+    ? "Спокойная светлая форма, в которой можно бережно собрать атмосферу, детали пары и настроение будущего вечера."
+    : "Праздничная анкета с более ярким настроением, чтобы сохранить характер юбиляра и важные акценты торжества.";
 
   const updateValue = (name: string, value: string) => {
     setValues((current) => ({ ...current, eventType, [name]: value }));
@@ -69,18 +78,12 @@ export function QuestionnaireForm({ eventType }: { eventType: EventType }) {
   };
 
   return (
-    <div className="rounded-[32px] border border-[var(--border)] bg-white/70 p-6 shadow-[0_20px_80px_rgba(77,54,31,0.08)] backdrop-blur-xl sm:p-8">
+    <div className={`rounded-[36px] border p-6 backdrop-blur-xl sm:p-8 ${wrapperClass}`}>
       <div className="mb-8 flex items-start justify-between gap-4">
         <div>
-          <div className="text-xs uppercase tracking-[0.28em] text-stone-500">
-            {eventType === "wedding" ? "Wedding Form" : "Jubilee Form"}
-          </div>
-          <h2 className="mt-2 text-3xl font-semibold text-stone-900">
-            {eventType === "wedding" ? "Анкета свадьбы" : "Анкета юбилея"}
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm leading-7 text-stone-600">
-            Короткая рабочая анкета, после которой ведущий получает заявку в host-панели и может собрать программу.
-          </p>
+          <div className={`text-xs uppercase tracking-[0.28em] ${badgeClass}`}>{isWedding ? "Wedding Form" : "Jubilee Form"}</div>
+          <h2 className="mt-2 text-3xl font-semibold text-stone-900">{title}</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-7 text-stone-600">{description}</p>
         </div>
       </div>
 
