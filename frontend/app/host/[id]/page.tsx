@@ -61,7 +61,7 @@ export default function HostDetailPage() {
       .then(([data, statusData]) => {
         setSubmission(data.item);
         setGeneration(statusData.generation || data.item.generation || { status: "idle" });
-        setHasProgram(Boolean(statusData.hasProgram));
+        setHasProgram(Boolean(statusData.hasProgram || data.item.program));
         if (data.item.program) {
           setProgram(data.item.program);
         }
@@ -80,10 +80,11 @@ export default function HostDetailPage() {
         const statusData = await fetchApi<GenerationResponse>(`/api/submissions/${id}/generation-status`);
         setGeneration(statusData.generation);
         setHasProgram(Boolean(statusData.hasProgram));
-        if (statusData.hasProgram) {
+        if (statusData.hasProgram || statusData.generation.status === "ready") {
           const data = await fetchApi<{ item: Submission }>(`/api/submissions/${id}`);
           setSubmission(data.item);
           setGeneration(data.item.generation || { status: "ready" });
+          setHasProgram(Boolean(statusData.hasProgram || data.item.program));
           if (data.item.program) {
             setProgram(data.item.program);
           }
@@ -97,6 +98,21 @@ export default function HostDetailPage() {
 
     return () => window.clearInterval(intervalId);
   }, [generation.status, id]);
+
+  useEffect(() => {
+    if (!id) return;
+    if (generation.status !== "ready" || hasProgram) return;
+
+    fetchApi<{ item: Submission }>(`/api/submissions/${id}`)
+      .then((data) => {
+        setSubmission(data.item);
+        setHasProgram(Boolean(data.item.program));
+        if (data.item.program) {
+          setProgram(data.item.program);
+        }
+      })
+      .catch(() => {});
+  }, [generation.status, hasProgram, id]);
 
   const handleGenerate = () => {
     if (!id) return;
