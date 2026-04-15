@@ -1,80 +1,72 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useState, useTransition } from "react";
+import { AppShell } from "@/components/shell";
 
-export default function LoginPage() {
+function LoginForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [isPending, startTransition] = useTransition();
 
-  const handleLogin = async () => {
-    try {
-      setLoading(true);
-      setError("");
+  const next = searchParams.get("next") || "/host";
 
+  const handleLogin = () => {
+    setError("");
+    startTransition(async () => {
       const response = await fetch("/api/host-login", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password }),
       });
 
-      const data = await response.json();
-
       if (!response.ok) {
-        throw new Error(data?.error || "Неверный пароль");
+        const data = (await response.json()) as { message?: string };
+        setError(data.message || "Ошибка входа");
+        return;
       }
 
-      window.location.href = "/host";
-    } catch (e: any) {
-      setError(e.message || "Ошибка входа");
-    } finally {
-      setLoading(false);
-    }
+      router.push(next);
+      router.refresh();
+    });
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#07070b] px-4 text-white">
-      <div className="w-full max-w-md rounded-[32px] border border-white/10 bg-white/5 p-8 backdrop-blur-xl">
-        <div className="inline-flex rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.24em] text-white/60">
-          Host Access
-        </div>
-
-        <h1 className="mt-5 text-3xl font-semibold tracking-tight">
-          Вход в панель ведущего
-        </h1>
-
-        <p className="mt-3 text-sm leading-7 text-white/60">
-          Введи пароль, чтобы открыть защищенную панель с заявками.
-        </p>
-
-        <div className="mt-6">
-          <div className="mb-2 text-sm text-white/80">Пароль</div>
+    <AppShell>
+      <main className="mx-auto flex min-h-[70vh] w-full max-w-xl items-center px-6 py-12">
+        <div className="w-full rounded-[36px] border border-[var(--border)] bg-white/80 p-8 shadow-[0_20px_80px_rgba(77,54,31,0.08)]">
+          <div className="text-xs uppercase tracking-[0.3em] text-stone-500">Host Login</div>
+          <h1 className="mt-3 text-4xl font-semibold text-stone-900">Вход в панель ведущего</h1>
+          <p className="mt-3 text-sm leading-7 text-stone-600">Панель `/host` закрыта через middleware и cookie. Введите пароль, чтобы открыть список заявок.</p>
           <input
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/30"
-            placeholder="Введите пароль"
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Пароль"
+            className="mt-6 w-full rounded-[20px] border border-[var(--border)] bg-[var(--surface)] px-4 py-4 text-sm"
           />
+          <button
+            type="button"
+            onClick={handleLogin}
+            disabled={isPending}
+            className="mt-4 w-full rounded-full bg-[var(--accent)] px-6 py-4 text-sm font-semibold text-white transition hover:bg-[var(--accent-strong)] disabled:opacity-70"
+          >
+            {isPending ? "Входим..." : "Войти"}
+          </button>
+          {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
         </div>
+      </main>
+    </AppShell>
+  );
+}
 
-        {error ? (
-          <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-            {error}
-          </div>
-        ) : null}
-
-        <button
-          type="button"
-          onClick={handleLogin}
-          disabled={loading}
-          className="mt-6 w-full rounded-full bg-white px-5 py-3 text-sm font-medium text-neutral-950 transition hover:scale-[1.02] disabled:opacity-60"
-        >
-          {loading ? "Вход..." : "Войти"}
-        </button>
-      </div>
-    </main>
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<AppShell><main className="mx-auto flex min-h-[70vh] w-full max-w-xl items-center px-6 py-12"><div className="w-full rounded-[36px] border border-[var(--border)] bg-white/80 p-8 text-sm text-stone-600">Загрузка формы входа...</div></main></AppShell>}>
+      <LoginForm />
+    </Suspense>
   );
 }

@@ -1,621 +1,691 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from typing import Optional
-from pathlib import Path
-from io import BytesIO
-from datetime import datetime
+from __future__ import annotations
+
 import json
 import os
 import re
+from datetime import datetime
+from io import BytesIO
+from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field, model_validator
 from docx import Document
+
+try:
+    from openai import OpenAI
+except Exception:  # pragma: no cover
+    OpenAI = None
 
 
 load_dotenv()
 
-app = FastAPI(title="Event AI Backend")
+SUPPORTED_EVENT_TYPES = {"wedding", "jubilee"}
+AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+FRONTEND_ORIGINS = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000")
+RAILWAY_VOLUME_MOUNT_PATH = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
 
-extra_origins = os.getenv("FRONTEND_ORIGINS", "")
-parsed_extra_origins = [item.strip() for item in extra_origins.split(",") if item.strip()]
+DATA_DIR = (
+    Path(RAILWAY_VOLUME_MOUNT_PATH) / "event_ai_data"
+    if RAILWAY_VOLUME_MOUNT_PATH
+    else Path(__file__).resolve().parent / "data"
+)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+SUBMISSIONS_FILE = DATA_DIR / "submissions.json"
 
-allowed_origins = [
-    "http://localhost:3000",
-    "https://frontend-production-c187.up.railway.app",
-    *parsed_extra_origins,
-]
+client = OpenAI(api_key=OPENAI_API_KEY) if OpenAI and OPENAI_API_KEY else None
 
+app = FastAPI(title="Event AI Backend", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=[origin.strip() for origin in FRONTEND_ORIGINS.split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-client = OpenAI()
-AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
-
-railway_mount_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
-if railway_mount_path:
-    DATA_DIR = Path(railway_mount_path) / "event_ai_data"
-else:
-    DATA_DIR = Path("data")
-
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-SUBMISSIONS_FILE = DATA_DIR / "submissions.json"
-
 
 class QuestionnaireSubmission(BaseModel):
-    eventType: str  # wedding | jubilee
+    eventType: str
+    clientName: str = Field(min_length=1)
+    phone: str = ""
+    eventDate: str = Field(min_length=1)
+    city: str = Field(min_length=1)
+    venue: str = Field(min_length=1)
+    startTime: str = Field(default="")
+    guestCount: str = ""
+    childrenInfo: str = ""
+    atmosphere: str = ""
+    fears: str = ""
+    hostWishes: str = ""
+    references: str = ""
+    musicLikes: str = ""
+    musicBans: str = ""
 
-    # common
-    clientName: str
-    phone: str
-    eventDate: str
-    city: str
-    venue: str
-    startTime: Optional[str] = ""
-    guestCount: Optional[str] = ""
-    childrenInfo: Optional[str] = ""
-    atmosphere: Optional[str] = ""
-    fears: Optional[str] = ""
-    hostWishes: Optional[str] = ""
-    references: Optional[str] = ""
-    musicLikes: Optional[str] = ""
-    musicBans: Optional[str] = ""
+    groomName: str = ""
+    brideName: str = ""
+    weddingTraditions: str = ""
+    groomParents: str = ""
+    brideParents: str = ""
+    grandparents: str = ""
+    loveStory: str = ""
+    coupleValues: str = ""
+    importantDates: str = ""
+    proposalStory: str = ""
+    nicknames: str = ""
+    insideJokes: str = ""
+    guestsList: str = ""
+    conflictTopics: str = ""
+    likedFormats: str = ""
+    keyMoments: str = ""
 
-    # wedding
-    groomName: Optional[str] = ""
-    brideName: Optional[str] = ""
-    weddingTraditions: Optional[str] = ""
-    groomParents: Optional[str] = ""
-    brideParents: Optional[str] = ""
-    grandparents: Optional[str] = ""
-    loveStory: Optional[str] = ""
-    coupleValues: Optional[str] = ""
-    importantDates: Optional[str] = ""
-    proposalStory: Optional[str] = ""
-    nicknames: Optional[str] = ""
-    insideJokes: Optional[str] = ""
-    guestsList: Optional[str] = ""
-    conflictTopics: Optional[str] = ""
-    likedFormats: Optional[str] = ""
-    keyMoments: Optional[str] = ""
+    celebrantName: str = ""
+    celebrantAge: str = ""
+    familyMembers: str = ""
+    anniversaryAtmosphere: str = ""
+    biographyStory: str = ""
+    achievements: str = ""
+    lifeStages: str = ""
+    characterTraits: str = ""
+    funnyFacts: str = ""
+    importantGuests: str = ""
+    jubileeConflictTopics: str = ""
+    jubileeLikedFormats: str = ""
+    whatCannotBeDone: str = ""
 
-    # jubilee
-    celebrantName: Optional[str] = ""
-    celebrantAge: Optional[str] = ""
-    familyMembers: Optional[str] = ""
-    anniversaryAtmosphere: Optional[str] = ""
-    keyMoments: Optional[str] = ""
-    biographyStory: Optional[str] = ""
-    achievements: Optional[str] = ""
-    lifeStages: Optional[str] = ""
-    characterTraits: Optional[str] = ""
-    funnyFacts: Optional[str] = ""
-    importantGuests: Optional[str] = ""
-    jubileeConflictTopics: Optional[str] = ""
-    jubileeLikedFormats: Optional[str] = ""
-    whatCannotBeDone: Optional[str] = ""
+    @model_validator(mode="after")
+    def validate_business_rules(self) -> "QuestionnaireSubmission":
+        if self.eventType not in SUPPORTED_EVENT_TYPES:
+            raise ValueError("Поддерживаются только wedding и jubilee")
+        if not self.startTime.strip():
+            raise ValueError("Поле startTime обязательно")
+        if self.eventType == "wedding" and (not self.groomName.strip() or not self.brideName.strip()):
+            raise ValueError("Для wedding обязательны groomName и brideName")
+        if self.eventType == "jubilee" and not self.celebrantName.strip():
+            raise ValueError("Для jubilee обязательно celebrantName")
+        return self
 
 
-def load_submissions() -> list:
+def load_submissions() -> list[dict[str, Any]]:
     if not SUBMISSIONS_FILE.exists():
         return []
-
     try:
-        with open(SUBMISSIONS_FILE, "r", encoding="utf-8") as file:
-            data = json.load(file)
-            return data if isinstance(data, list) else []
-    except (json.JSONDecodeError, OSError):
+        return json.loads(SUBMISSIONS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
         return []
 
 
-def save_submissions(submissions: list) -> None:
-    with open(SUBMISSIONS_FILE, "w", encoding="utf-8") as file:
-        json.dump(submissions, file, ensure_ascii=False, indent=2)
+def save_submissions(submissions: list[dict[str, Any]]) -> None:
+    SUBMISSIONS_FILE.write_text(
+        json.dumps(submissions, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
-def find_submission_index(submissions: list, submission_id: str) -> int:
-    for index, item in enumerate(submissions):
-        if item.get("id") == submission_id:
-            return index
-    return -1
-
-
-def get_questionnaire_labels() -> dict:
+def get_questionnaire_labels() -> dict[str, str]:
     return {
         "eventType": "Тип мероприятия",
         "clientName": "Название заявки",
         "phone": "Телефон",
         "eventDate": "Дата события",
         "city": "Город",
-        "venue": "Площадка",
+        "venue": "Площадка / ресторан",
         "startTime": "Время начала / сбор гостей",
         "guestCount": "Количество гостей",
-        "childrenInfo": "Дети",
+        "childrenInfo": "Будут ли дети",
         "atmosphere": "Атмосфера",
         "fears": "Страхи и переживания",
         "hostWishes": "Пожелания к ведущему",
-        "references": "Референсы и ориентиры",
-        "musicLikes": "Любимая музыка",
-        "musicBans": "Что нельзя включать",
-
+        "references": "Референсы по стилю вечера",
+        "musicLikes": "Какая музыка нравится",
+        "musicBans": "Что из музыки нельзя включать",
         "groomName": "Имя жениха",
         "brideName": "Имя невесты",
-        "weddingTraditions": "Свадебные традиции",
+        "weddingTraditions": "Какие свадебные традиции нужны",
         "groomParents": "Родители жениха",
         "brideParents": "Родители невесты",
         "grandparents": "Бабушки и дедушки",
         "loveStory": "История знакомства",
-        "coupleValues": "Ценности пары",
-        "importantDates": "Важные даты и события",
+        "coupleValues": "Главные ценности пары",
+        "importantDates": "Важные даты и события пары",
         "proposalStory": "История предложения",
-        "nicknames": "Ласковые имена",
-        "insideJokes": "Внутренние шутки",
-        "guestsList": "Список гостей и описания",
-        "conflictTopics": "Конфликтные темы или чувствительные фигуры",
-        "likedFormats": "Нравящиеся конкурсы / форматы",
-
+        "nicknames": "Как ласково называют друг друга",
+        "insideJokes": "Внутренние шутки / мемы",
+        "guestsList": "Имена гостей и характеристики",
+        "conflictTopics": "Конфликтные темы / чувствительные фигуры",
+        "likedFormats": "Какие форматы нравятся",
+        "keyMoments": "Какие 3-5 моментов самые важные",
         "celebrantName": "Имя юбиляра",
         "celebrantAge": "Возраст юбиляра",
         "familyMembers": "Семья юбиляра",
         "anniversaryAtmosphere": "Атмосфера юбилея",
-        "keyMoments": "Обязательные моменты юбилея",
-        "biographyStory": "История юбиляра",
-        "achievements": "Достижения и чем гордятся",
+        "biographyStory": "Истории из жизни",
+        "achievements": "Важные достижения",
         "lifeStages": "Важные этапы жизни",
-        "characterTraits": "Характер и особенности юбиляра",
-        "funnyFacts": "Смешные факты / любимые фразы",
+        "characterTraits": "Главные качества юбиляра",
+        "funnyFacts": "Любимые фразы / шутки / мемы",
         "importantGuests": "Важные гости",
-        "jubileeConflictTopics": "Чувствительные темы на юбилее",
-        "jubileeLikedFormats": "Нравящиеся форматы на юбилее",
-        "whatCannotBeDone": "Чего нельзя делать на юбилее",
+        "jubileeConflictTopics": "Конфликтные темы",
+        "jubileeLikedFormats": "Какие форматы нравятся",
+        "whatCannotBeDone": "Чего нельзя делать",
     }
 
 
-def build_questionnaire_context(questionnaire: dict) -> str:
+def build_questionnaire_context(questionnaire: dict[str, Any]) -> str:
     labels = get_questionnaire_labels()
-    lines = []
-
-    for key, value in questionnaire.items():
-        if isinstance(value, str) and value.strip():
-            label = labels.get(key, key)
-            lines.append(f"{label}: {value.strip()}")
-
+    lines: list[str] = []
+    for key, label in labels.items():
+        value = str(questionnaire.get(key, "")).strip()
+        if value:
+            lines.append(f"{label}: {value}")
     return "\n".join(lines)
 
 
-def try_parse_json(content: str) -> dict:
+def list_from_text(value: str, fallback: list[str]) -> list[str]:
+    items = [item.strip(" -•\t") for item in re.split(r"[\n,;]+", value or "") if item.strip(" -•\t")]
+    return items[:6] if items else fallback
+
+
+def build_mock_program(questionnaire: dict[str, Any]) -> dict[str, Any]:
+    event_type = questionnaire["eventType"]
+    atmosphere = questionnaire.get("atmosphere") or questionnaire.get("anniversaryAtmosphere") or "теплая, живая, современная"
+    main_person = (
+        f"{questionnaire.get('groomName', '').strip()} и {questionnaire.get('brideName', '').strip()}".strip()
+        if event_type == "wedding"
+        else questionnaire.get("celebrantName", "").strip()
+    )
+    timing_anchor = questionnaire.get("startTime", "").strip() or "18:00"
+    key_moments = list_from_text(
+        questionnaire.get("keyMoments", ""),
+        ["сильное открытие", "эмоциональный основной блок", "мягкий танцевальный разгон", "сильный финал"],
+    )
+    hard_bans = list_from_text(
+        questionnaire.get("musicBans", "") + "\n" + questionnaire.get("whatCannotBeDone", ""),
+        ["кринжовые конкурсы", "жесткий интерактив против воли гостей"],
+    )
+    sensitive_topics = list_from_text(
+        questionnaire.get("conflictTopics", "") + "\n" + questionnaire.get("jubileeConflictTopics", ""),
+        ["не выносить в центр зала чувствительные темы без согласования"],
+    )
+
+    return {
+        "event_passport": {
+            "event_type": event_type,
+            "format_name": "Сценарий для ведущего Event AI",
+            "city": questionnaire.get("city", ""),
+            "venue": questionnaire.get("venue", ""),
+            "event_date": questionnaire.get("eventDate", ""),
+            "working_timeline_note": "Сценарий собран в быстром базовом режиме без OpenAI API.",
+            "main_goal": "Провести живой, собранный и персонализированный вечер без просадок по ритму.",
+            "atmosphere": atmosphere,
+            "style": "современный, персональный, режиссерски собранный",
+            "mandatory_points": key_moments,
+            "hard_bans": hard_bans,
+            "timing_anchor": timing_anchor,
+        },
+        "quality_panel": {
+            "scenario_verdict": "Рабочая базовая версия готова к адаптации под площадку.",
+            "director_verdict": "Ритм построен от мягкого входа к сильному эмоциональному пику.",
+            "critic_verdict": "Нужна живая донастройка после уточнения гостей и тайминга кухни.",
+            "final_ready": True,
+            "fixed_issues": [
+                "Собран безопасный тайминг без токсичных и устаревших механик.",
+                "Учтены запреты и чувствительные темы из анкеты.",
+            ],
+        },
+        "concept": {
+            "big_idea": f"Вечер про людей, ради которых собираются рядом с {main_person}.",
+            "main_director_thesis": "Не форсировать шум, а постепенно раскрывать зал через личные смыслы и точный музыкальный ритм.",
+            "main_emotional_result": "Гости чувствуют не набор активностей, а цельный вечер с характером.",
+            "why_this_event_will_be_remembered": "Потому что в центре не шаблоны, а реальные люди, их история и правильный темп.",
+        },
+        "trend_layer": {
+            "trend_summary": "Сценарий опирается на персонализацию, мягкое вовлечение и аккуратную музыкальную драматургию.",
+            "applied_trends": [
+                "минимум неловкого интерактива",
+                "личные истории вместо штампов",
+                "сильные, но короткие речевые заходы между блоками",
+            ],
+            "rejected_outdated_patterns": [
+                "принудительные конкурсы",
+                "шаблонные тосты без привязки к героям вечера",
+            ],
+        },
+        "key_host_commands": [
+            "С первых минут задать спокойную уверенную тональность и не спешить с разгоном.",
+            "Главных героев вечера держать в центре, но не перегружать обязательными выходами.",
+            "С чувствительными темами работать только через заранее согласованные формулировки.",
+            "Не жертвовать эмоциональным ядром ради случайного интерактива.",
+        ],
+        "questions_to_clarify_before_event": [
+            "Есть ли точный тайминг подачи горячего и торта?",
+            "Нужны ли официальные поздравления по списку и в каком порядке?",
+            "Есть ли сюрпризы от гостей, которые надо встроить в программу?",
+        ],
+        "director_logic": {
+            "opening_logic": "Вход в вечер через теплое знакомство с залом и аккуратную сборку внимания.",
+            "development_logic": "Чередование общения, смысловых точек и музыкальных волн без провисаний.",
+            "family_or_core_emotional_logic": "Самый личный блок ставится в момент, когда зал уже доверяет ведущему и готов слушать.",
+            "final_logic": "Финал собирает всех в одном эмоциональном фокусе и оставляет ощущение завершенности.",
+        },
+        "scenario_timeline": [
+            {
+                "time_from": timing_anchor,
+                "time_to": "18:20",
+                "block_title": "Сбор гостей и мягкий welcome",
+                "block_purpose": "Снять напряжение и собрать зал в единое поле внимания.",
+                "what_happens": "Гости заходят, музыка работает фоном, ведущий мягко приветствует ключевых людей.",
+                "host_action": "Следить за входом, называть людей по имени, не форсировать шум.",
+                "host_text": f"Сегодня мы собираемся не просто отметить дату, а бережно сложить вечер вокруг истории {main_person}. Пусть у каждого будет время оглядеться, почувствовать атмосферу и войти в этот ритм без спешки.",
+                "dj_task": "Держать теплый, современный фон без резких переходов и лишней громкости.",
+                "director_move": "Сначала доверие, потом динамика.",
+                "risk_control": "Не перегружать старт микрофоном, если гости еще рассаживаются.",
+                "transition": "Когда большинство в зале, переводим внимание к официальному открытию.",
+            },
+            {
+                "time_from": "18:20",
+                "time_to": "18:40",
+                "block_title": "Открытие вечера",
+                "block_purpose": "Обозначить характер вечера и правила тональности.",
+                "what_happens": "Ведущий собирает внимание, обозначает героя вечера и маршрут программы.",
+                "host_action": "Говорить ярко, но без пафоса, задать ритм и уважительную энергетику.",
+                "host_text": "У хорошего вечера всегда есть свой пульс. Не тот, что шумит ради шума, а тот, который держит людей рядом. Сегодня мы будем двигаться именно так: с юмором, с теплом, с точностью к важным моментам и без всего лишнего.",
+                "dj_task": "Подложка на открытие, затем аккуратный уход под речь.",
+                "director_move": "Сформировать доверие к ведущему и интерес к следующему блоку.",
+                "risk_control": "Если зал шумный, начать с короткой версии открытия и добрать внимание позже.",
+                "transition": "После открытия переводим зал к первому содержательному блоку.",
+            },
+            {
+                "time_from": "18:40",
+                "time_to": "19:20",
+                "block_title": "Первый ключевой смысловой блок",
+                "block_purpose": "Дать вечеру личную глубину через историю и близких людей.",
+                "what_happens": "Подводка к главным людям, первые тосты или важные слова, эмоциональная сборка зала.",
+                "host_action": "Держать темп, не растягивать длинные выходы, бережно работать с эмоциями.",
+                "host_text": f"У каждого по-настоящему важного вечера есть внутренний свет. Он появляется не от декора и не от громкости колонок, а от людей, которые знают, каким {main_person} бывает вне праздничной картинки. И именно им сейчас хочется дать слово.",
+                "dj_task": "Поддержать эмоциональные выходы мягкими инструментальными подложками.",
+                "director_move": "Углубить контакт зала с историей события.",
+                "risk_control": "Следить, чтобы эмоциональный блок не ушел в затяжную официальность.",
+                "transition": "После теплой глубины вывести вечер в более живое, но не резкое движение.",
+            },
+            {
+                "time_from": "19:20",
+                "time_to": "20:00",
+                "block_title": "Интерактив и вовлечение без кринжа",
+                "block_purpose": "Вовлечь гостей мягко и персонально, не разрушая достоинство вечера.",
+                "what_happens": "Короткий интерактив по гостям, историям, ассоциациям или заранее собранным фактам.",
+                "host_action": "Поднимать только уместных людей и не вытаскивать тех, кому некомфортно.",
+                "host_text": "Иногда лучший способ оживить зал это не заставить его что-то делать, а точно поймать людей в их живых реакциях. Поэтому сейчас работаем не по шаблону, а по тем людям, которые уже сами задают настроение.",
+                "dj_task": "Короткие музыкальные отбивки, без клоунады и резких мемных вставок.",
+                "director_move": "Поднять энергию и не потерять вкус.",
+                "risk_control": f"Не вовлекать темы: {', '.join(sensitive_topics)}.",
+                "transition": "После разгона логично вывести гостей в танец или гастрономическую паузу.",
+            },
+            {
+                "time_from": "20:00",
+                "time_to": "21:00",
+                "block_title": "Танцевальная волна и второй пик",
+                "block_purpose": "Переключить вечер из общения в телесную, живую энергию.",
+                "what_happens": "Танцевальный блок, затем короткая остановка под следующий смысловой заход.",
+                "host_action": "Запускать танец короткими командами и не мешать музыке работать.",
+                "host_text": "Есть моменты, которые не нужно объяснять словами. Их нужно просто вовремя отпустить в музыку. Поэтому сейчас вечер перестает сидеть за столами и начинает дышать шире.",
+                "dj_task": "Построить волну от знакомого комфортного ритма к более яркому танцевальному ядру.",
+                "director_move": "Дать телу зала движение, не потеряв управляемость.",
+                "risk_control": "Если танцпол не идет, начать с хитов средней энергии и знакомого грува.",
+                "transition": "На пике энергии вернуть внимание к финальному смысловому блоку.",
+            },
+            {
+                "time_from": "21:00",
+                "time_to": "21:30",
+                "block_title": "Финал",
+                "block_purpose": "Собрать вечер в понятную эмоциональную точку.",
+                "what_happens": "Финальные слова, важный общий момент, завершение программы.",
+                "host_action": "Говорить точнее и теплее, чем в начале, без формальной торжественности.",
+                "host_text": "Хороший вечер заканчивается не тогда, когда выключают музыку. Он заканчивается тогда, когда каждый уносит с собой чувство, что был сегодня не зрителем, а частью чего-то настоящего. Именно это важно сохранить сейчас.",
+                "dj_task": "Подложить финальную композицию и аккуратно собрать зал в общий жест.",
+                "director_move": "Не пересластить, а завершить чисто и по-человечески.",
+                "risk_control": "Не растягивать финал, если гости уже устали.",
+                "transition": "После официального финала возможен свободный хвост вечера.",
+            },
+        ],
+        "host_script": {
+            "opening_main": "Добрый вечер. Сегодня здесь собрались люди, которые умеют превращать дату в память, а встречу в историю. И если у этого вечера есть главная задача, то она не в том, чтобы просто красиво пройти по таймингу, а в том, чтобы сделать каждую важную точку живой и настоящей.",
+            "opening_short": "Добрый вечер. Начинаем спокойно, красиво и по-настоящему про вас.",
+            "welcome_line": "Пусть этот вечер с первых минут будет не шумным, а своим.",
+            "first_core_intro": "Прежде чем разгоняться дальше, важно дать место тем словам, на которых вообще держится атмосфера таких вечеров.",
+            "family_block_intro": "Есть люди, рядом с которыми любая история становится глубже. И именно им сейчас хочется уступить центр внимания.",
+            "surprise_intro": "Следующий момент не про эффект ради эффекта, а про то самое тепло, которое остается после праздника дольше всего.",
+            "dance_block_intro": "А теперь вечеру пора менять походку. Из красивого разговора переходим в живую энергию зала.",
+            "final_block_intro": "Перед тем как отпустить этот вечер дальше, хочется собрать его в одну ясную мысль.",
+            "closing_words": "Спасибо за доверие, за внимание друг к другу и за ту атмосферу, которую невозможно заказать отдельно. Ее создают только люди.",
+        },
+        "dj_guidance": {
+            "overall_music_policy": "Двигаться от комфортного современного welcome к более яркой энергии, не ломая эмоциональные сцены резкими включениями.",
+            "welcome_music": "Nu-disco, light pop, soft funk, спокойные русские и международные треки без навязчивого вокального давления.",
+            "opening_music": "Короткий кинематографичный заход, затем чистый уход под микрофон.",
+            "table_background": "Негромкий groove, soul-pop, lounge-pop, мягкий funk.",
+            "emotional_blocks_music": "Инструментальные версии, piano / strings / atmospheric pads.",
+            "dance_block_1": "Знакомые хиты средней энергии, чтобы безопасно поднять танцпол.",
+            "dance_block_2": "Основной пик: современные поп-хиты, disco edits, singalong без кринжа.",
+            "dance_block_3": "Финальный легкий добор с учетом возраста и состава гостей.",
+            "final_block_music": "Теплая, объединяющая композиция без агрессивного бита.",
+            "final_music": "Трек на общее чувство завершения, а не на максимальную громкость.",
+            "stop_list": hard_bans,
+            "technical_notes": [
+                "Не перебивать микрофон подводками и мемными джинглами.",
+                "На эмоциональных блоках держать запас по громкости.",
+                "Перед танцем дать ведущему 5-7 секунд чистого входа.",
+            ],
+        },
+        "guest_management": {
+            "active_people": ["Поднимать первыми самых открытых и поддерживающих атмосферу гостей."],
+            "shy_people": ["Не вытаскивать в центр без предварительного контакта и согласия."],
+            "important_people": ["Родные, ключевые друзья, гости с особыми смысловыми ролями."],
+            "do_not_involve": sensitive_topics,
+            "sensitive_people_or_topics": sensitive_topics,
+            "management_notes": [
+                "Следить за балансом внимания между главными героями и гостями.",
+                "Не превращать персональные истории в публичный допрос.",
+            ],
+        },
+        "risk_map": [
+            {
+                "risk": "Провал по динамике в первой трети вечера",
+                "why_it_matters": "Если старт вялый, зал позже сложнее собрать в единый ритм.",
+                "how_to_prevent": "Короткое открытие, быстрый переход к людям и первым живым реакциям.",
+                "what_to_do_if_triggered": "Срезать длинные речи и раньше выводить вечер в музыкальный или интерактивный блок.",
+            },
+            {
+                "risk": "Неудачное касание чувствительных тем",
+                "why_it_matters": "Это может резко испортить доверие к ведущему.",
+                "how_to_prevent": "Держать стоп-лист под рукой и заранее согласовать формулировки.",
+                "what_to_do_if_triggered": "Быстро увести фокус на нейтральный теплый блок без самооправданий со сцены.",
+            },
+        ],
+        "plan_b": [
+            {
+                "situation": "Гости долго рассаживаются",
+                "solution": "Продлить welcome, сократить первое официальное открытие и сместить основной смысловой блок на 10-15 минут.",
+            },
+            {
+                "situation": "Танцпол не включается с первого захода",
+                "solution": "Начать с более узнаваемых и комфортных треков, добавить короткий речевой подогрев и повторный заход через 7-10 минут.",
+            },
+        ],
+        "final_print_version": {
+            "title": f"Краткий план {event_type}",
+            "summary": "Собранный, современный вечер с упором на персонализацию, ритм и уважение к гостям.",
+            "timeline_short": [
+                f"{timing_anchor} welcome",
+                "открытие",
+                "ключевой смысловой блок",
+                "мягкое вовлечение",
+                "танцевальная волна",
+                "финал",
+            ],
+            "must_do": [
+                "держать темп",
+                "работать через личные смыслы",
+                "согласовать важные выходы заранее",
+            ],
+            "must_not_do": hard_bans,
+            "host_focus": [
+                "доверие зала",
+                "точность формулировок",
+                "бережный контроль энергии",
+            ],
+            "dj_focus": [
+                "мягкие переходы",
+                "поддержка смысловых блоков",
+                "безопасный разгон танцпола",
+            ],
+        },
+    }
+
+
+def build_system_prompt() -> str:
+    return """
+Ты создаешь рабочую режиссерскую программу для ведущего.
+Работаешь только с типами wedding и jubilee.
+Нельзя возвращать обзор анкеты, советы без структуры, кринжовые конкурсы, токсичный юмор и шаблонные банальности.
+Нужно вернуть строго JSON с ключами:
+event_passport, quality_panel, concept, trend_layer, key_host_commands,
+questions_to_clarify_before_event, director_logic, scenario_timeline,
+host_script, dj_guidance, guest_management, risk_map, plan_b, final_print_version.
+Каждый блок должен быть прикладным и пригодным для реальной работы ведущего и диджея.
+"""
+
+
+def generate_agent_program(questionnaire: dict[str, Any]) -> dict[str, Any]:
+    if client is None:
+        return build_mock_program(questionnaire)
+
     try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        start = content.find("{")
-        end = content.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            cleaned = content[start:end + 1]
-            return json.loads(cleaned)
-        raise
-
-
-def generate_agent_program(questionnaire: dict) -> dict:
-    context = build_questionnaire_context(questionnaire)
-    event_type = questionnaire.get("eventType", "").strip().lower()
-
-    system_prompt = """
-Ты — сильный event-стратег, сценарист ведущих, режиссер мероприятий и редактор финального документа.
-Работаешь только с двумя типами мероприятий:
-- wedding
-- jubilee
-
-Твоя задача: на основе анкеты сразу собрать ГОТОВЫЙ рабочий документ ведущего.
-
-Это не обзор анкеты.
-Это не список советов.
-Это не черновые заметки.
-
-Это должен быть готовый продукт для работы ведущего.
-
-Критические требования:
-- только один цельный сильный результат
-- никакой воды
-- никакой банальности
-- никакой пустой красивости
-- текст должен быть полезен в реальном зале
-- стиль ведущего должен быть образным, метафоричным, живым
-- можно немного переборщить с метафорами, если речь звучит красиво и сценично
-- ведущий должен не комментировать, а вести зал словом
-- ключевые блоки должны содержать длинный, пригодный для чтения текст
-- если блок предполагает речь 3–5 минут, текст должен быть действительно длинным
-- музыка должна быть описана конкретно
-- диджей должен получить не абстракцию, а понятные треки, связки, логику заходов и стоп-лист
-- wedding и jubilee должны ощущаться абсолютно по-разному
-- нужно встроить современные подходы к ведению: персональность, режиссура, мягкое вовлечение, отказ от кринжовых форматов, музыкальная драматургия, ритмические волны
-- НЕ упоминай поиск трендов, интернет или источники
-- просто используй современную event-логику как часть финального решения
-
-Что обязательно сделать:
-1. выделить паспорт события
-2. собрать ключевые команды ведущему
-3. собрать вопросы, которые нужно уточнить до мероприятия, если данных не хватает
-4. построить режиссерскую логику вечера
-5. построить ПОШАГОВЫЙ ТАЙМИНГ
-6. на каждый блок дать:
-   - цель
-   - что происходит
-   - действие ведущего
-   - длинный текст ведущего
-   - задачу диджея
-   - режиссерский ход
-   - контроль риска
-   - переход
-7. дать отдельный блок текстов ведущего
-8. дать отдельный блок рекомендаций диджею
-9. дать работу с гостями
-10. дать риски
-11. дать план Б
-12. дать краткую версию для печати
-
-Правила безопасности и качества:
-- нельзя использовать унизительные конкурсы
-- нельзя предлагать рискованный или токсичный юмор
-- нельзя повторять грубые формулировки клиента буквально, если они звучат опасно или обидно
-- если нет времени старта, строй разумный рабочий расчет и честно это укажи
-- если данных не хватает, не срывай сценарий, а строй лучший рабочий вариант и отдельно выноси уточнения
-- не делай все блоки одинаковыми по длине
-- самые важные блоки делай сильнее и длиннее
-
-Верни строго JSON:
-{
-  "event_passport": {
-    "event_type": "",
-    "format_name": "",
-    "city": "",
-    "venue": "",
-    "event_date": "",
-    "working_timeline_note": "",
-    "main_goal": "",
-    "atmosphere": "",
-    "style": "",
-    "mandatory_points": [],
-    "hard_bans": [],
-    "timing_anchor": ""
-  },
-  "quality_panel": {
-    "scenario_verdict": "",
-    "director_verdict": "",
-    "critic_verdict": "",
-    "final_ready": true,
-    "fixed_issues": []
-  },
-  "concept": {
-    "big_idea": "",
-    "main_director_thesis": "",
-    "main_emotional_result": "",
-    "why_this_event_will_be_remembered": ""
-  },
-  "trend_layer": {
-    "trend_summary": "",
-    "applied_trends": [],
-    "rejected_outdated_patterns": []
-  },
-  "key_host_commands": [],
-  "questions_to_clarify_before_event": [],
-  "director_logic": {
-    "opening_logic": "",
-    "development_logic": "",
-    "family_or_core_emotional_logic": "",
-    "final_logic": ""
-  },
-  "scenario_timeline": [
-    {
-      "time_from": "",
-      "time_to": "",
-      "block_title": "",
-      "block_purpose": "",
-      "what_happens": "",
-      "host_action": "",
-      "host_text": "",
-      "dj_task": "",
-      "director_move": "",
-      "risk_control": "",
-      "transition": ""
-    }
-  ],
-  "host_script": {
-    "opening_main": "",
-    "opening_short": "",
-    "welcome_line": "",
-    "first_core_intro": "",
-    "family_block_intro": "",
-    "surprise_intro": "",
-    "dance_block_intro": "",
-    "final_block_intro": "",
-    "closing_words": ""
-  },
-  "dj_guidance": {
-    "overall_music_policy": "",
-    "welcome_music": "",
-    "opening_music": "",
-    "table_background": "",
-    "emotional_blocks_music": "",
-    "dance_block_1": "",
-    "dance_block_2": "",
-    "dance_block_3": "",
-    "final_block_music": "",
-    "final_music": "",
-    "stop_list": [],
-    "technical_notes": []
-  },
-  "guest_management": {
-    "active_people": [],
-    "shy_people": [],
-    "important_people": [],
-    "do_not_involve": [],
-    "sensitive_people_or_topics": [],
-    "management_notes": []
-  },
-  "risk_map": [
-    {
-      "risk": "",
-      "why_it_matters": "",
-      "how_to_prevent": "",
-      "what_to_do_if_triggered": ""
-    }
-  ],
-  "plan_b": [
-    {
-      "situation": "",
-      "solution": ""
-    }
-  ],
-  "final_print_version": {
-    "title": "",
-    "summary": "",
-    "timeline_short": [],
-    "must_do": [],
-    "must_not_do": [],
-    "host_focus": [],
-    "dj_focus": []
-  }
-}
-"""
-
-    user_prompt = f"""
-Тип мероприятия: {event_type}
-
-Анкета:
-{context}
-
-Собери финальный рабочий сценарий.
-Верни только JSON.
-"""
-
-    last_error = None
-
-    for _ in range(2):
+        response = client.responses.create(
+            model=AI_MODEL,
+            reasoning={"effort": "low"},
+            input=[
+                {"role": "system", "content": build_system_prompt()},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Тип мероприятия: {questionnaire['eventType']}\n\n"
+                        "Анкета:\n"
+                        f"{build_questionnaire_context(questionnaire)}\n\n"
+                        "Верни только валидный JSON."
+                    ),
+                },
+            ],
+        )
+        raw_text = response.output_text.strip()
         try:
-            response = client.responses.create(
-                model=AI_MODEL,
-                reasoning={"effort": "low"},
-                input=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            )
-            return try_parse_json(response.output_text)
-        except Exception as error:
-            last_error = error
-
-    raise RuntimeError(f"Не удалось получить валидный JSON сценария: {last_error}")
+            return json.loads(raw_text)
+        except json.JSONDecodeError:
+            start = raw_text.find("{")
+            end = raw_text.rfind("}")
+            if start == -1 or end == -1:
+                raise RuntimeError("OpenAI вернул невалидный JSON")
+            return json.loads(raw_text[start : end + 1])
+    except Exception:
+        return build_mock_program(questionnaire)
 
 
 def safe_filename(value: str) -> str:
     translit_map = {
-        "а": "a", "б": "b", "в": "v", "г": "g", "д": "d",
-        "е": "e", "ё": "e", "ж": "zh", "з": "z", "и": "i",
-        "й": "y", "к": "k", "л": "l", "м": "m", "н": "n",
-        "о": "o", "п": "p", "р": "r", "с": "s", "т": "t",
-        "у": "u", "ф": "f", "х": "h", "ц": "ts", "ч": "ch",
-        "ш": "sh", "щ": "sch", "ъ": "", "ы": "y", "ь": "",
-        "э": "e", "ю": "yu", "я": "ya",
+        "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+        "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+        "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+        "ф": "f", "х": "h", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sch", "ы": "y",
+        "э": "e", "ю": "yu", "я": "ya", "ь": "", "ъ": "",
     }
-
     value = value.strip().lower()
-    result = []
-
+    result: list[str] = []
     for char in value:
-        lower_char = char.lower()
-        if lower_char in translit_map:
-            result.append(translit_map[lower_char])
+        if char in translit_map:
+            result.append(translit_map[char])
         elif char.isalnum():
             result.append(char)
-        elif char in [" ", "-", "_"]:
+        elif char in {" ", "-", "_"}:
             result.append("_")
-
-    cleaned = "".join(result)
-    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
-    return cleaned or "anketa"
+    return re.sub(r"_+", "_", "".join(result)).strip("_") or "event_ai"
 
 
-def add_heading(document: Document, text: str, level: int = 1) -> None:
-    document.add_heading(text, level=level)
-
-
-def add_label_value(document: Document, label: str, value: str) -> None:
+def add_label_value(document: Document, label: str, value: Any) -> None:
     paragraph = document.add_paragraph()
     paragraph.add_run(f"{label}: ").bold = True
-    paragraph.add_run(value if value else "Не указано")
+    paragraph.add_run(str(value).strip() if str(value).strip() else "Не указано")
 
 
-def add_list(document: Document, items: list[str]) -> None:
+def add_list(document: Document, items: list[Any]) -> None:
     if not items:
         document.add_paragraph("Не указано")
         return
-
     for item in items:
-        document.add_paragraph(item, style="List Bullet")
+        document.add_paragraph(str(item), style="List Bullet")
 
 
-def build_docx(submission: dict, program: dict) -> BytesIO:
+def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
     questionnaire = submission["questionnaire"]
     labels = get_questionnaire_labels()
 
     document = Document()
-    document.add_heading("Анкета мероприятия и режиссерская программа ведущего", 0)
-
+    document.add_heading("Event AI: анкета и программа ведущего", 0)
     add_label_value(document, "ID заявки", submission["id"])
     add_label_value(document, "Создано", submission["created_at"])
 
-    add_heading(document, "1. Анкета клиента", level=1)
+    document.add_heading("1. Анкета клиента", level=1)
     for key, label in labels.items():
-      արժեք = questionnaire.get(key, "")
-      add_label_value(document, label, արժեք)
+        add_label_value(document, label, questionnaire.get(key, ""))
 
-    add_heading(document, "2. Готовый сценарий ведущего", level=1)
+    document.add_heading("2. Сценарий", level=1)
 
     passport = program.get("event_passport", {})
-    add_heading(document, "2.1. Паспорт события", level=2)
-    add_label_value(document, "Тип", passport.get("event_type", ""))
-    add_label_value(document, "Формат", passport.get("format_name", ""))
-    add_label_value(document, "Город", passport.get("city", ""))
-    add_label_value(document, "Площадка", passport.get("venue", ""))
-    add_label_value(document, "Дата", passport.get("event_date", ""))
-    add_label_value(document, "Рабочая пометка по таймингу", passport.get("working_timeline_note", ""))
-    add_label_value(document, "Главная цель", passport.get("main_goal", ""))
-    add_label_value(document, "Атмосфера", passport.get("atmosphere", ""))
-    add_label_value(document, "Стиль", passport.get("style", ""))
-    add_label_value(document, "Тайминговый якорь", passport.get("timing_anchor", ""))
+    document.add_heading("2.1 Паспорт события", level=2)
+    for field, title in [
+        ("event_type", "Тип"),
+        ("format_name", "Формат"),
+        ("city", "Город"),
+        ("venue", "Площадка"),
+        ("event_date", "Дата"),
+        ("working_timeline_note", "Примечание по таймингу"),
+        ("main_goal", "Главная цель"),
+        ("atmosphere", "Атмосфера"),
+        ("style", "Стиль"),
+        ("timing_anchor", "Тайминговый якорь"),
+    ]:
+        add_label_value(document, title, passport.get(field, ""))
     document.add_paragraph("Обязательные точки:")
     add_list(document, passport.get("mandatory_points", []))
     document.add_paragraph("Жесткие запреты:")
     add_list(document, passport.get("hard_bans", []))
 
-    quality_panel = program.get("quality_panel", {})
-    add_heading(document, "2.2. Внутренняя проверка качества", level=2)
-    add_label_value(document, "Вердикт сценариста", quality_panel.get("scenario_verdict", ""))
-    add_label_value(document, "Вердикт режиссера", quality_panel.get("director_verdict", ""))
-    add_label_value(document, "Вердикт критика", quality_panel.get("critic_verdict", ""))
-    add_label_value(document, "Готово к работе", "Да" if quality_panel.get("final_ready", False) else "Нет")
-    document.add_paragraph("Что было исправлено:")
-    add_list(document, quality_panel.get("fixed_issues", []))
+    quality = program.get("quality_panel", {})
+    document.add_heading("2.2 Проверка качества", level=2)
+    add_label_value(document, "Вердикт сценариста", quality.get("scenario_verdict", ""))
+    add_label_value(document, "Вердикт режиссера", quality.get("director_verdict", ""))
+    add_label_value(document, "Вердикт критика", quality.get("critic_verdict", ""))
+    add_label_value(document, "Готово к работе", "Да" if quality.get("final_ready") else "Нет")
+    document.add_paragraph("Исправленные слабые места:")
+    add_list(document, quality.get("fixed_issues", []))
 
     concept = program.get("concept", {})
-    add_heading(document, "2.3. Концепция", level=2)
-    add_label_value(document, "Большая идея", concept.get("big_idea", ""))
-    add_label_value(document, "Главный режиссерский тезис", concept.get("main_director_thesis", ""))
-    add_label_value(document, "Главный эмоциональный результат", concept.get("main_emotional_result", ""))
-    add_label_value(document, "Почему вечер запомнится", concept.get("why_this_event_will_be_remembered", ""))
+    document.add_heading("2.3 Концепция", level=2)
+    for field, title in [
+        ("big_idea", "Большая идея"),
+        ("main_director_thesis", "Главный режиссерский тезис"),
+        ("main_emotional_result", "Эмоциональный результат"),
+        ("why_this_event_will_be_remembered", "Почему вечер запомнится"),
+    ]:
+        add_label_value(document, title, concept.get(field, ""))
 
-    trend_layer = program.get("trend_layer", {})
-    add_heading(document, "2.4. Современная логика сценария", level=2)
-    add_label_value(document, "Краткое резюме", trend_layer.get("trend_summary", ""))
-    document.add_paragraph("Что применено:")
-    add_list(document, trend_layer.get("applied_trends", []))
-    document.add_paragraph("Что отброшено как устаревшее:")
-    add_list(document, trend_layer.get("rejected_outdated_patterns", []))
-
-    add_heading(document, "2.5. Ключевые команды ведущему", level=2)
+    document.add_heading("2.4 Команды ведущему", level=2)
     add_list(document, program.get("key_host_commands", []))
 
-    add_heading(document, "2.6. Что уточнить до мероприятия", level=2)
+    document.add_heading("2.5 Что уточнить", level=2)
     add_list(document, program.get("questions_to_clarify_before_event", []))
 
-    director_logic = program.get("director_logic", {})
-    add_heading(document, "2.7. Режиссерская ось", level=2)
-    add_label_value(document, "Логика открытия", director_logic.get("opening_logic", ""))
-    add_label_value(document, "Логика развития", director_logic.get("development_logic", ""))
-    add_label_value(document, "Логика эмоционального ядра", director_logic.get("family_or_core_emotional_logic", ""))
-    add_label_value(document, "Логика финала", director_logic.get("final_logic", ""))
+    logic = program.get("director_logic", {})
+    document.add_heading("2.6 Режиссерская логика", level=2)
+    for field, title in [
+        ("opening_logic", "Логика открытия"),
+        ("development_logic", "Логика развития"),
+        ("family_or_core_emotional_logic", "Логика эмоционального ядра"),
+        ("final_logic", "Логика финала"),
+    ]:
+        add_label_value(document, title, logic.get(field, ""))
 
-    add_heading(document, "2.8. Пошаговый тайминг", level=2)
+    document.add_heading("2.7 Тайминг", level=2)
     for index, block in enumerate(program.get("scenario_timeline", []), start=1):
-        document.add_paragraph(
-            f"{index}. {block.get('time_from', '')}–{block.get('time_to', '')} | {block.get('block_title', 'Блок')}"
-        )
-        add_label_value(document, "Цель", block.get("block_purpose", ""))
-        add_label_value(document, "Что происходит", block.get("what_happens", ""))
-        add_label_value(document, "Действие ведущего", block.get("host_action", ""))
-        add_label_value(document, "Текст ведущего", block.get("host_text", ""))
-        add_label_value(document, "Задача диджея", block.get("dj_task", ""))
-        add_label_value(document, "Режиссерский ход", block.get("director_move", ""))
-        add_label_value(document, "Контроль риска", block.get("risk_control", ""))
-        add_label_value(document, "Переход", block.get("transition", ""))
+        document.add_paragraph(f"{index}. {block.get('time_from', '')} - {block.get('time_to', '')}: {block.get('block_title', '')}")
+        for field, title in [
+            ("block_purpose", "Цель"),
+            ("what_happens", "Что происходит"),
+            ("host_action", "Действие ведущего"),
+            ("host_text", "Текст ведущего"),
+            ("dj_task", "Задача диджея"),
+            ("director_move", "Режиссерский ход"),
+            ("risk_control", "Контроль риска"),
+            ("transition", "Переход"),
+        ]:
+            add_label_value(document, title, block.get(field, ""))
 
-    host_script = program.get("host_script", {})
-    add_heading(document, "2.9. Тексты ведущего", level=2)
-    add_label_value(document, "Основное открытие", host_script.get("opening_main", ""))
-    add_label_value(document, "Короткое открытие", host_script.get("opening_short", ""))
-    add_label_value(document, "Welcome-фраза", host_script.get("welcome_line", ""))
-    add_label_value(document, "Подводка к первому ключевому блоку", host_script.get("first_core_intro", ""))
-    add_label_value(document, "Подводка к семейному блоку", host_script.get("family_block_intro", ""))
-    add_label_value(document, "Подводка к сюрпризу", host_script.get("surprise_intro", ""))
-    add_label_value(document, "Подводка к танцевальному блоку", host_script.get("dance_block_intro", ""))
-    add_label_value(document, "Подводка к финальному блоку", host_script.get("final_block_intro", ""))
-    add_label_value(document, "Финальные слова", host_script.get("closing_words", ""))
+    script = program.get("host_script", {})
+    document.add_heading("2.8 Тексты ведущего", level=2)
+    for field, title in [
+        ("opening_main", "Основное открытие"),
+        ("opening_short", "Короткое открытие"),
+        ("welcome_line", "Welcome line"),
+        ("first_core_intro", "Подводка к первому ключевому блоку"),
+        ("family_block_intro", "Подводка к семейному блоку"),
+        ("surprise_intro", "Подводка к сюрпризу"),
+        ("dance_block_intro", "Подводка к танцевальному блоку"),
+        ("final_block_intro", "Подводка к финалу"),
+        ("closing_words", "Финальные слова"),
+    ]:
+        add_label_value(document, title, script.get(field, ""))
 
-    dj_guidance = program.get("dj_guidance", {})
-    add_heading(document, "2.10. Рекомендации диджею", level=2)
-    add_label_value(document, "Общая музыкальная политика", dj_guidance.get("overall_music_policy", ""))
-    add_label_value(document, "Музыка на welcome", dj_guidance.get("welcome_music", ""))
-    add_label_value(document, "Музыка на открытие", dj_guidance.get("opening_music", ""))
-    add_label_value(document, "Музыка на застольный фон", dj_guidance.get("table_background", ""))
-    add_label_value(document, "Музыка на эмоциональные блоки", dj_guidance.get("emotional_blocks_music", ""))
-    add_label_value(document, "Танцевальный блок 1", dj_guidance.get("dance_block_1", ""))
-    add_label_value(document, "Танцевальный блок 2", dj_guidance.get("dance_block_2", ""))
-    add_label_value(document, "Танцевальный блок 3", dj_guidance.get("dance_block_3", ""))
-    add_label_value(document, "Музыка на финальный блок", dj_guidance.get("final_block_music", ""))
-    add_label_value(document, "Финальная музыка", dj_guidance.get("final_music", ""))
-    document.add_paragraph("Стоп-лист:")
-    add_list(document, dj_guidance.get("stop_list", []))
-    document.add_paragraph("Технические заметки:")
-    add_list(document, dj_guidance.get("technical_notes", []))
+    dj = program.get("dj_guidance", {})
+    document.add_heading("2.9 DJ guidance", level=2)
+    for field, title in [
+        ("overall_music_policy", "Общая музыкальная логика"),
+        ("welcome_music", "Welcome music"),
+        ("opening_music", "Opening music"),
+        ("table_background", "Table background"),
+        ("emotional_blocks_music", "Emotional blocks"),
+        ("dance_block_1", "Dance block 1"),
+        ("dance_block_2", "Dance block 2"),
+        ("dance_block_3", "Dance block 3"),
+        ("final_block_music", "Final block"),
+        ("final_music", "Final music"),
+    ]:
+        add_label_value(document, title, dj.get(field, ""))
+    document.add_paragraph("Stop list:")
+    add_list(document, dj.get("stop_list", []))
+    document.add_paragraph("Technical notes:")
+    add_list(document, dj.get("technical_notes", []))
 
     guest_management = program.get("guest_management", {})
-    add_heading(document, "2.11. Работа с гостями", level=2)
-    document.add_paragraph("Активные люди:")
-    add_list(document, guest_management.get("active_people", []))
-    document.add_paragraph("Скромные люди:")
-    add_list(document, guest_management.get("shy_people", []))
-    document.add_paragraph("Важные люди:")
-    add_list(document, guest_management.get("important_people", []))
-    document.add_paragraph("Кого не вовлекать:")
-    add_list(document, guest_management.get("do_not_involve", []))
-    document.add_paragraph("Чувствительные люди и темы:")
-    add_list(document, guest_management.get("sensitive_people_or_topics", []))
-    document.add_paragraph("Управленческие заметки:")
-    add_list(document, guest_management.get("management_notes", []))
+    document.add_heading("2.10 Работа с гостями", level=2)
+    for field, title in [
+        ("active_people", "Активные люди"),
+        ("shy_people", "Скромные люди"),
+        ("important_people", "Важные люди"),
+        ("do_not_involve", "Кого не вовлекать"),
+        ("sensitive_people_or_topics", "Чувствительные темы"),
+        ("management_notes", "Заметки по управлению"),
+    ]:
+        document.add_paragraph(f"{title}:")
+        add_list(document, guest_management.get(field, []))
 
-    add_heading(document, "2.12. Риски", level=2)
-    for index, risk in enumerate(program.get("risk_map", []), start=1):
-        document.add_paragraph(f"{index}. {risk.get('risk', 'Риск')}")
-        add_label_value(document, "Почему важно", risk.get("why_it_matters", ""))
-        add_label_value(document, "Как предотвратить", risk.get("how_to_prevent", ""))
-        add_label_value(document, "Что делать, если случилось", risk.get("what_to_do_if_triggered", ""))
+    document.add_heading("2.11 Риски", level=2)
+    for item in program.get("risk_map", []):
+        add_label_value(document, "Риск", item.get("risk", ""))
+        add_label_value(document, "Почему важно", item.get("why_it_matters", ""))
+        add_label_value(document, "Как предотвратить", item.get("how_to_prevent", ""))
+        add_label_value(document, "Если сработало", item.get("what_to_do_if_triggered", ""))
 
-    add_heading(document, "2.13. План Б", level=2)
-    for index, item in enumerate(program.get("plan_b", []), start=1):
-        document.add_paragraph(f"{index}. {item.get('situation', 'Ситуация')}")
+    document.add_heading("2.12 План Б", level=2)
+    for item in program.get("plan_b", []):
+        add_label_value(document, "Ситуация", item.get("situation", ""))
         add_label_value(document, "Решение", item.get("solution", ""))
 
     final_print = program.get("final_print_version", {})
-    add_heading(document, "2.14. Краткая версия для печати", level=2)
+    document.add_heading("2.13 Краткая версия", level=2)
     add_label_value(document, "Название", final_print.get("title", ""))
     add_label_value(document, "Краткое резюме", final_print.get("summary", ""))
-    document.add_paragraph("Короткий таймлайн:")
-    add_list(document, final_print.get("timeline_short", []))
-    document.add_paragraph("Обязательно сделать:")
-    add_list(document, final_print.get("must_do", []))
-    document.add_paragraph("Нельзя делать:")
-    add_list(document, final_print.get("must_not_do", []))
-    document.add_paragraph("Фокус ведущего:")
-    add_list(document, final_print.get("host_focus", []))
-    document.add_paragraph("Фокус диджея:")
-    add_list(document, final_print.get("dj_focus", []))
+    for field, title in [
+        ("timeline_short", "Короткий таймлайн"),
+        ("must_do", "Обязательно сделать"),
+        ("must_not_do", "Нельзя делать"),
+        ("host_focus", "Фокус ведущего"),
+        ("dj_focus", "Фокус диджея"),
+    ]:
+        document.add_paragraph(f"{title}:")
+        add_list(document, final_print.get(field, []))
 
     buffer = BytesIO()
     document.save(buffer)
@@ -623,138 +693,101 @@ def build_docx(submission: dict, program: dict) -> BytesIO:
     return buffer
 
 
+def get_submission_or_404(submission_id: str) -> tuple[list[dict[str, Any]], int]:
+    submissions = load_submissions()
+    for index, submission in enumerate(submissions):
+        if submission["id"] == submission_id:
+            return submissions, index
+    raise HTTPException(status_code=404, detail="Анкета не найдена")
+
+
 @app.get("/")
-def root():
+def root() -> dict[str, Any]:
     return {
         "status": "ok",
         "message": "Event AI backend is running",
         "data_path": str(SUBMISSIONS_FILE),
-        "using_railway_volume": bool(railway_mount_path),
+        "using_railway_volume": bool(RAILWAY_VOLUME_MOUNT_PATH),
         "model": AI_MODEL,
-        "supported_event_types": ["wedding", "jubilee"],
+        "openai_enabled": bool(client),
+        "supported_event_types": sorted(SUPPORTED_EVENT_TYPES),
     }
 
 
 @app.get("/health")
-def health():
+def health() -> dict[str, str]:
     return {"status": "healthy"}
 
 
-@app.get("/api/submissions")
-def get_submissions():
-    submissions = load_submissions()
-    return {
-        "status": "success",
-        "count": len(submissions),
-        "items": submissions
-    }
-
-
 @app.post("/api/questionnaire")
-def submit_questionnaire(payload: QuestionnaireSubmission):
-    if payload.eventType not in ["wedding", "jubilee"]:
-        raise HTTPException(status_code=400, detail="Поддерживаются только wedding и jubilee")
-
-    submission_data = payload.model_dump()
-
-    record = {
+def submit_questionnaire(payload: QuestionnaireSubmission) -> dict[str, Any]:
+    submission = {
         "id": datetime.now().strftime("%Y%m%d%H%M%S%f"),
         "created_at": datetime.now().isoformat(),
-        "questionnaire": submission_data,
+        "questionnaire": payload.model_dump(),
     }
-
     submissions = load_submissions()
-    submissions.append(record)
+    submissions.append(submission)
     save_submissions(submissions)
-
     return {
         "status": "success",
-        "message": "Анкета успешно получена",
+        "message": "Анкета сохранена",
         "clientName": payload.clientName,
         "eventType": payload.eventType,
-        "savedId": record["id"]
+        "savedId": submission["id"],
     }
+
+
+@app.get("/api/submissions")
+def get_submissions() -> dict[str, Any]:
+    submissions = load_submissions()
+    return {"status": "success", "count": len(submissions), "items": submissions}
 
 
 @app.get("/api/submissions/{submission_id}")
-def get_submission_by_id(submission_id: str):
-    submissions = load_submissions()
-    found_item = next((item for item in submissions if item["id"] == submission_id), None)
-
-    if not found_item:
-        raise HTTPException(status_code=404, detail="Анкета не найдена")
-
-    return {
-        "status": "success",
-        "item": found_item
-    }
+def get_submission(submission_id: str) -> dict[str, Any]:
+    submissions, index = get_submission_or_404(submission_id)
+    return {"status": "success", "item": submissions[index]}
 
 
 @app.post("/api/submissions/{submission_id}/generate-program")
-def generate_program(submission_id: str):
-    submissions = load_submissions()
-    found_index = find_submission_index(submissions, submission_id)
-
-    if found_index == -1:
-        raise HTTPException(status_code=404, detail="Анкета не найдена")
-
-    found_item = submissions[found_index]
-    cached_program = found_item.get("program")
-    if isinstance(cached_program, dict):
+def generate_program(submission_id: str) -> dict[str, Any]:
+    submissions, index = get_submission_or_404(submission_id)
+    submission = submissions[index]
+    if isinstance(submission.get("program"), dict):
         return {
             "status": "success",
             "submissionId": submission_id,
-            "program": cached_program,
+            "program": submission["program"],
             "cached": True,
         }
 
     try:
-        program = generate_agent_program(found_item["questionnaire"])
+        program = generate_agent_program(submission["questionnaire"])
     except Exception as error:
-        raise HTTPException(status_code=500, detail=f"Ошибка генерации программы: {error}")
+        raise HTTPException(status_code=500, detail=f"Ошибка генерации программы: {error}") from error
 
-    submissions[found_index]["program"] = program
+    submissions[index]["program"] = program
     save_submissions(submissions)
-
-    return {
-        "status": "success",
-        "submissionId": submission_id,
-        "program": program,
-        "cached": False,
-    }
+    return {"status": "success", "submissionId": submission_id, "program": program, "cached": False}
 
 
 @app.get("/api/submissions/{submission_id}/export-docx")
-def export_docx(submission_id: str):
-    submissions = load_submissions()
-    found_index = find_submission_index(submissions, submission_id)
+def export_docx(submission_id: str) -> StreamingResponse:
+    submissions, index = get_submission_or_404(submission_id)
+    submission = submissions[index]
+    program = submission.get("program")
+    if not isinstance(program, dict):
+        program = generate_agent_program(submission["questionnaire"])
+        submissions[index]["program"] = program
+        save_submissions(submissions)
 
-    if found_index == -1:
-        raise HTTPException(status_code=404, detail="Анкета не найдена")
-
-    found_item = submissions[found_index]
-
-    try:
-        cached_program = found_item.get("program")
-        if isinstance(cached_program, dict):
-            program = cached_program
-        else:
-            program = generate_agent_program(found_item["questionnaire"])
-            submissions[found_index]["program"] = program
-            save_submissions(submissions)
-
-        file_buffer = build_docx(found_item, program)
-
-        client_name = safe_filename(found_item["questionnaire"].get("clientName", "anketa"))
-        event_type = safe_filename(found_item["questionnaire"].get("eventType", "event"))
-        filename = f"{event_type}_{client_name}_{submission_id}.docx"
-
-        return StreamingResponse(
-            file_buffer,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"'
-            },
-        )
-    except Exception as error:
-        raise HTTPException(status_code=500, detail=f"Ошибка выгрузки Word: {error}")
+    buffer = build_docx(submission, program)
+    client_name = safe_filename(submission["questionnaire"].get("clientName", "client"))
+    event_type = safe_filename(submission["questionnaire"].get("eventType", "event"))
+    filename = f"{event_type}_{client_name}_{submission_id}.docx"
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )

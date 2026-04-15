@@ -1,28 +1,26 @@
-import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 
-export async function POST(request: NextRequest) {
-  const { password } = await request.json();
+export async function POST(request: Request) {
+  const { password } = (await request.json()) as { password?: string };
   const expectedPassword = process.env.HOST_PANEL_PASSWORD;
 
   if (!expectedPassword) {
-    return NextResponse.json(
-      { error: "HOST_PANEL_PASSWORD не задан в переменных окружения" },
-      { status: 500 }
-    );
+    return NextResponse.json({ message: "HOST_PANEL_PASSWORD is not configured" }, { status: 500 });
   }
 
   if (!password || password !== expectedPassword) {
-    return NextResponse.json({ error: "Неверный пароль" }, { status: 401 });
+    return NextResponse.json({ message: "Неверный пароль" }, { status: 401 });
   }
 
-  const response = NextResponse.json({ status: "ok" });
-  response.cookies.set("host_auth", expectedPassword, {
+  const cookieStore = await cookies();
+  cookieStore.set("event-ai-host-auth", "ok", {
     httpOnly: true,
     sameSite: "lax",
-    secure: request.nextUrl.protocol === "https:",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 60 * 60 * 8,
     path: "/",
-    maxAge: 60 * 60 * 24 * 14,
   });
 
-  return response;
+  return NextResponse.json({ status: "success" });
 }

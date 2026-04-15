@@ -1,95 +1,73 @@
 import Link from "next/link";
+import { AppShell } from "@/components/shell";
 
-export default function Home() {
+const cards = [
+  {
+    href: "/questionnaire/wedding",
+    title: "Свадьба",
+    subtitle: "История пары, ритм вечера, семейные смыслы и тонкая работа с атмосферой.",
+  },
+  {
+    href: "/questionnaire/jubilee",
+    title: "Юбилей",
+    subtitle: "Биография героя вечера, близкие люди, важные достижения и современная драматургия.",
+  },
+];
+
+export default function HomePage() {
   return (
-    <main className="min-h-screen overflow-hidden bg-[#0a0a0f] text-white">
-      <section className="relative flex min-h-screen items-center justify-center px-6 py-16">
-        <div className="absolute inset-0">
-          <div className="absolute left-1/2 top-0 h-[420px] w-[420px] -translate-x-1/2 rounded-full bg-amber-300/10 blur-3xl" />
-          <div className="absolute right-[10%] top-[20%] h-[260px] w-[260px] rounded-full bg-fuchsia-400/10 blur-3xl" />
-          <div className="absolute bottom-[10%] left-[8%] h-[220px] w-[220px] rounded-full bg-cyan-400/10 blur-3xl" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_30%),linear-gradient(to_bottom,rgba(255,255,255,0.02),rgba(255,255,255,0))]" />
-        </div>
-
-        <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-col items-center text-center">
-          <div className="mb-6 inline-flex items-center rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.28em] text-white/65 backdrop-blur-md">
-            premium event questionnaire
+    <AppShell>
+      <main className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-6 pb-16 pt-8">
+        <section className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="rounded-[40px] border border-[var(--border)] bg-[linear-gradient(135deg,rgba(255,250,244,0.96),rgba(248,233,215,0.92))] p-8 shadow-[0_30px_100px_rgba(77,54,31,0.1)] sm:p-12">
+            <div className="text-xs uppercase tracking-[0.34em] text-stone-500">Event AI</div>
+            <h1 className="mt-4 max-w-3xl text-5xl leading-tight font-semibold text-stone-900 sm:text-6xl">
+              Анкеты и сценарии для ведущего без шаблонной пустоты.
+            </h1>
+            <p className="mt-6 max-w-2xl text-base leading-8 text-stone-700">
+              Клиент выбирает только один из двух форматов, заполняет анкету, а ведущий получает заявку в закрытой панели и собирает готовую программу мероприятия.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Link className="rounded-full bg-[var(--accent)] px-6 py-4 text-sm font-semibold text-white transition hover:bg-[var(--accent-strong)]" href="/questionnaire">
+                Открыть анкеты
+              </Link>
+              <Link className="rounded-full border border-[var(--border)] bg-white/70 px-6 py-4 text-sm font-semibold text-stone-800" href="/host">
+                Панель ведущего
+              </Link>
+            </div>
           </div>
 
-          <h1 className="max-w-5xl text-5xl font-semibold leading-tight tracking-tight sm:text-6xl md:text-7xl">
-            Стильная анкета
-            <span className="block bg-gradient-to-r from-white via-white to-white/50 bg-clip-text text-transparent">
-              для красивых мероприятий
-            </span>
-          </h1>
+          <div className="grid gap-5">
+            <div className="rounded-[32px] border border-[var(--border)] bg-white/70 p-6 backdrop-blur-sm">
+              <div className="text-3xl font-semibold text-stone-900">2</div>
+              <p className="mt-2 text-sm leading-7 text-stone-600">Поддерживаемых формата: только `wedding` и `jubilee`.</p>
+            </div>
+            <div className="rounded-[32px] border border-[var(--border)] bg-white/70 p-6 backdrop-blur-sm">
+              <div className="text-3xl font-semibold text-stone-900">1</div>
+              <p className="mt-2 text-sm leading-7 text-stone-600">Основной AI-вызов на генерацию программы, чтобы UX оставался быстрым.</p>
+            </div>
+            <div className="rounded-[32px] border border-[var(--border)] bg-white/70 p-6 backdrop-blur-sm">
+              <div className="text-3xl font-semibold text-stone-900">.docx</div>
+              <p className="mt-2 text-sm leading-7 text-stone-600">Сценарий можно выгрузить в Word и забрать на площадку.</p>
+            </div>
+          </div>
+        </section>
 
-          <p className="mt-6 max-w-2xl text-base leading-8 text-white/70 sm:text-lg">
-            Современная онлайн-анкета для свадеб, дней рождения, корпоративов и
-            частных событий. Помогает заранее собрать все важные детали о формате,
-            атмосфере и пожеланиях к вечеру.
-          </p>
-
-          <div className="mt-10 flex w-full max-w-md flex-col gap-4 sm:max-w-none sm:flex-row sm:justify-center">
+        <section className="grid gap-6 md:grid-cols-2">
+          {cards.map((card) => (
             <Link
-              href="/questionnaire"
-              className="rounded-full bg-white px-8 py-4 text-center text-sm font-medium text-neutral-950 transition duration-200 hover:scale-[1.02]"
+              key={card.href}
+              href={card.href}
+              className="group rounded-[36px] border border-[var(--border)] bg-white/75 p-8 transition hover:-translate-y-1 hover:shadow-[0_20px_60px_rgba(77,54,31,0.08)]"
             >
-              Открыть демо-анкету
+              <div className="text-xs uppercase tracking-[0.3em] text-stone-500">Выбор формата</div>
+              <h2 className="mt-3 text-3xl font-semibold text-stone-900">{card.title}</h2>
+              <p className="mt-4 max-w-xl text-sm leading-7 text-stone-600">{card.subtitle}</p>
+              <div className="mt-6 text-sm font-semibold text-[var(--accent)]">Открыть форму</div>
             </Link>
-
-            <button className="rounded-full border border-white/15 bg-white/5 px-8 py-4 text-sm font-medium text-white backdrop-blur-md transition duration-200 hover:bg-white/10">
-              Для ведущего
-            </button>
-          </div>
-
-          <div className="mt-16 grid w-full max-w-5xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="rounded-[28px] border border-white/10 bg-white/5 p-6 text-left shadow-2xl shadow-black/20 backdrop-blur-xl">
-              <div className="mb-3 text-sm uppercase tracking-[0.2em] text-white/40">
-                свадьбы
-              </div>
-              <p className="text-sm leading-7 text-white/75">
-                Воздушная эстетика, деликатная подача, внимание к истории пары и
-                эмоциональной атмосфере вечера.
-              </p>
-            </div>
-
-            <div className="rounded-[28px] border border-white/10 bg-white/5 p-6 text-left shadow-2xl shadow-black/20 backdrop-blur-xl">
-              <div className="mb-3 text-sm uppercase tracking-[0.2em] text-white/40">
-                дни рождения
-              </div>
-              <p className="text-sm leading-7 text-white/75">
-                Яркий визуальный тон, личные акценты, характер события и детали,
-                которые делают праздник по-настоящему своим.
-              </p>
-            </div>
-
-            <div className="rounded-[28px] border border-white/10 bg-white/5 p-6 text-left shadow-2xl shadow-black/20 backdrop-blur-xl sm:col-span-2 lg:col-span-1">
-              <div className="mb-3 text-sm uppercase tracking-[0.2em] text-white/40">
-                корпоративы
-              </div>
-              <p className="text-sm leading-7 text-white/75">
-                Статусный современный стиль, внимание к динамике, составу гостей и
-                общей тональности мероприятия.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-14 grid w-full max-w-4xl grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur-md">
-              <div className="text-3xl font-semibold">3+</div>
-              <div className="mt-2 text-sm text-white/60">ключевых формата событий</div>
-            </div>
-            <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur-md">
-              <div className="text-3xl font-semibold">30+</div>
-              <div className="mt-2 text-sm text-white/60">детальных вопросов в анкете</div>
-            </div>
-            <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur-md">
-              <div className="text-3xl font-semibold">100%</div>
-              <div className="mt-2 text-sm text-white/60">mobile-friendly подача</div>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
+          ))}
+        </section>
+      </main>
+    </AppShell>
   );
 }
