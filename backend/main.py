@@ -533,6 +533,22 @@ def normalize_program(program: dict[str, Any], questionnaire: dict[str, Any]) ->
     for key, value in fallback.items():
         if key not in program or not program[key]:
             program[key] = value
+    for key in [
+        "event_passport",
+        "quality_panel",
+        "concept",
+        "trend_layer",
+        "director_logic",
+        "host_script",
+        "dj_guidance",
+        "guest_management",
+        "final_print_version",
+    ]:
+        if not isinstance(program.get(key), dict):
+            program[key] = fallback[key]
+    for key in ["key_host_commands", "questions_to_clarify_before_event", "risk_map", "plan_b"]:
+        if not isinstance(program.get(key), list):
+            program[key] = fallback[key]
     if not isinstance(program.get("scenario_timeline"), list) or not program["scenario_timeline"]:
         program["scenario_timeline"] = fallback["scenario_timeline"]
     return program
@@ -639,6 +655,14 @@ def add_list(document: Document, items: list[Any]) -> None:
         document.add_paragraph(str(item), style="List Bullet")
 
 
+def as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
 def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
     questionnaire = submission["questionnaire"]
     labels = get_questionnaire_labels()
@@ -654,7 +678,7 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
 
     document.add_heading("2. Сценарий ведущего", level=1)
 
-    passport = program.get("event_passport", {})
+    passport = as_dict(program.get("event_passport"))
     document.add_heading("2.1 Паспорт события", level=2)
     for field, title in [
         ("event_type", "Тип"),
@@ -670,20 +694,20 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
     ]:
         add_label_value(document, title, passport.get(field, ""))
     document.add_paragraph("Обязательные точки:")
-    add_list(document, passport.get("mandatory_points", []))
+    add_list(document, as_list(passport.get("mandatory_points")))
     document.add_paragraph("Жесткие запреты:")
-    add_list(document, passport.get("hard_bans", []))
+    add_list(document, as_list(passport.get("hard_bans")))
 
-    quality = program.get("quality_panel", {})
+    quality = as_dict(program.get("quality_panel"))
     document.add_heading("2.2 Качество результата", level=2)
     add_label_value(document, "Сценарный вердикт", quality.get("scenario_verdict", ""))
     add_label_value(document, "Режиссерский вердикт", quality.get("director_verdict", ""))
     add_label_value(document, "Критический вердикт", quality.get("critic_verdict", ""))
     add_label_value(document, "Готово к работе", "Да" if quality.get("final_ready") else "Нет")
     document.add_paragraph("Исправленные слабые места:")
-    add_list(document, quality.get("fixed_issues", []))
+    add_list(document, as_list(quality.get("fixed_issues")))
 
-    concept = program.get("concept", {})
+    concept = as_dict(program.get("concept"))
     document.add_heading("2.3 Концепция", level=2)
     for field, title in [
         ("big_idea", "Большая идея"),
@@ -693,21 +717,21 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
     ]:
         add_label_value(document, title, concept.get(field, ""))
 
-    trend_layer = program.get("trend_layer", {})
+    trend_layer = as_dict(program.get("trend_layer"))
     document.add_heading("2.4 Современная логика", level=2)
     add_label_value(document, "Резюме", trend_layer.get("trend_summary", ""))
     document.add_paragraph("Что применено:")
-    add_list(document, trend_layer.get("applied_trends", []))
+    add_list(document, as_list(trend_layer.get("applied_trends")))
     document.add_paragraph("Что отброшено как устаревшее:")
-    add_list(document, trend_layer.get("rejected_outdated_patterns", []))
+    add_list(document, as_list(trend_layer.get("rejected_outdated_patterns")))
 
     document.add_heading("2.5 Ключевые команды ведущему", level=2)
-    add_list(document, program.get("key_host_commands", []))
+    add_list(document, as_list(program.get("key_host_commands")))
 
     document.add_heading("2.6 Что нужно уточнить до мероприятия", level=2)
-    add_list(document, program.get("questions_to_clarify_before_event", []))
+    add_list(document, as_list(program.get("questions_to_clarify_before_event")))
 
-    logic = program.get("director_logic", {})
+    logic = as_dict(program.get("director_logic"))
     document.add_heading("2.7 Режиссерская логика вечера", level=2)
     for field, title in [
         ("opening_logic", "Логика открытия"),
@@ -718,7 +742,8 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
         add_label_value(document, title, logic.get(field, ""))
 
     document.add_heading("2.8 Пошаговый тайминг", level=2)
-    for index, block in enumerate(program.get("scenario_timeline", []), start=1):
+    for index, block in enumerate(as_list(program.get("scenario_timeline")), start=1):
+        block = as_dict(block)
         document.add_paragraph(f"{index}. {block.get('time_from', '')} - {block.get('time_to', '')}: {block.get('block_title', '')}")
         for field, title in [
             ("block_purpose", "Цель"),
@@ -732,7 +757,7 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
         ]:
             add_label_value(document, title, block.get(field, ""))
 
-    script = program.get("host_script", {})
+    script = as_dict(program.get("host_script"))
     document.add_heading("2.9 Тексты ведущего", level=2)
     for field, title in [
         ("opening_main", "Opening main"),
@@ -747,7 +772,7 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
     ]:
         add_label_value(document, title, script.get(field, ""))
 
-    dj = program.get("dj_guidance", {})
+    dj = as_dict(program.get("dj_guidance"))
     document.add_heading("2.10 DJ guidance", level=2)
     for field, title in [
         ("overall_music_policy", "Overall music policy"),
@@ -763,11 +788,11 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
     ]:
         add_label_value(document, title, dj.get(field, ""))
     document.add_paragraph("Stop list:")
-    add_list(document, dj.get("stop_list", []))
+    add_list(document, as_list(dj.get("stop_list")))
     document.add_paragraph("Technical notes:")
-    add_list(document, dj.get("technical_notes", []))
+    add_list(document, as_list(dj.get("technical_notes")))
 
-    guest_management = program.get("guest_management", {})
+    guest_management = as_dict(program.get("guest_management"))
     document.add_heading("2.11 Работа с гостями", level=2)
     for field, title in [
         ("active_people", "Активные люди"),
@@ -778,21 +803,23 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
         ("management_notes", "Рабочие заметки"),
     ]:
         document.add_paragraph(f"{title}:")
-        add_list(document, guest_management.get(field, []))
+        add_list(document, as_list(guest_management.get(field)))
 
     document.add_heading("2.12 Риски", level=2)
-    for item in program.get("risk_map", []):
+    for item in as_list(program.get("risk_map")):
+        item = as_dict(item)
         add_label_value(document, "Риск", item.get("risk", ""))
         add_label_value(document, "Почему важен", item.get("why_it_matters", ""))
         add_label_value(document, "Как предотвратить", item.get("how_to_prevent", ""))
         add_label_value(document, "Что делать, если сработало", item.get("what_to_do_if_triggered", ""))
 
     document.add_heading("2.13 План Б", level=2)
-    for item in program.get("plan_b", []):
+    for item in as_list(program.get("plan_b")):
+        item = as_dict(item)
         add_label_value(document, "Ситуация", item.get("situation", ""))
         add_label_value(document, "Решение", item.get("solution", ""))
 
-    final_print = program.get("final_print_version", {})
+    final_print = as_dict(program.get("final_print_version"))
     document.add_heading("2.14 Краткая версия для печати", level=2)
     add_label_value(document, "Название", final_print.get("title", ""))
     add_label_value(document, "Краткое резюме", final_print.get("summary", ""))
@@ -804,7 +831,7 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
         ("dj_focus", "Фокус диджея"),
     ]:
         document.add_paragraph(f"{title}:")
-        add_list(document, final_print.get(field, []))
+        add_list(document, as_list(final_print.get(field)))
 
     buffer = BytesIO()
     document.save(buffer)
