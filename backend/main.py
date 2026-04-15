@@ -25,8 +25,10 @@ except Exception:  # pragma: no cover
 load_dotenv()
 
 SUPPORTED_EVENT_TYPES = {"wedding", "jubilee"}
-PROGRAM_SCHEMA_VERSION = 3
-AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+PROGRAM_SCHEMA_VERSION = 4
+EVENT_AI_MODE = os.getenv("EVENT_AI_MODE", "premium").strip().lower()
+AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4" if EVENT_AI_MODE == "premium" else "gpt-5.4-mini")
+AI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "medium" if EVENT_AI_MODE == "premium" else "low").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 FRONTEND_ORIGINS = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000")
 RAILWAY_VOLUME_MOUNT_PATH = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
@@ -226,6 +228,135 @@ def build_personalization_brief(questionnaire: dict[str, Any]) -> dict[str, Any]
             "в зале есть люди, для которых эта история действительно личная, а не формальная",
         ),
         "music_likes": extract_music_preferences(questionnaire),
+    }
+
+
+def parse_event_date_context(questionnaire: dict[str, Any]) -> dict[str, Any]:
+    raw_date = str(questionnaire.get("eventDate", "")).strip()
+    month = ""
+    season = "all-season"
+    year = datetime.now().year
+    for pattern in ("%Y-%m-%d", "%d.%m.%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            parsed = datetime.strptime(raw_date, pattern)
+            year = parsed.year
+            month = parsed.strftime("%B")
+            if parsed.month in {12, 1, 2}:
+                season = "winter"
+            elif parsed.month in {3, 4, 5}:
+                season = "spring"
+            elif parsed.month in {6, 7, 8}:
+                season = "summer"
+            else:
+                season = "autumn"
+            break
+        except ValueError:
+            continue
+    return {
+        "raw_date": raw_date,
+        "event_year": year,
+        "event_month": month,
+        "event_season": season,
+    }
+
+
+def build_trend_bank(questionnaire: dict[str, Any]) -> dict[str, Any]:
+    event_context = parse_event_date_context(questionnaire)
+    event_year = event_context["event_year"]
+    is_wedding = questionnaire.get("eventType") == "wedding"
+    season = event_context["event_season"]
+
+    seasonal_logic = {
+        "winter": "больше кинематографичности, теплого света, камерности и контрастной музыкальной драматургии",
+        "spring": "больше ощущения новизны, воздуха, editorial-lightness и романтики без сиропа",
+        "summer": "больше живого движения, легкости, open-air energy, позднего танцпола и естественного контакта с гостями",
+        "autumn": "больше глубины, фактуры, благородного тепла, взрослой эмоции и насыщенного narrative-ритма",
+        "all-season": "логика подбирается по анкете, но с приоритетом персонализации и режиссерской цельности",
+    }
+
+    wedding_trends = [
+        "editorial storytelling вместо банкетного набора тостов и конкурсов",
+        "гостевой experience строится через curated moments, а не через постоянное микрофонное давление",
+        "audio guest book / voice notes / короткие аудио-включения от близких работают сильнее, чем длинная череда одинаковых поздравлений",
+        "portrait-studio и documentary-подход к гостям усиливают ощущение события как красивой личной истории, а не просто банкета",
+        "диджей работает сетами и переходами по драматургии, а не жанровыми общими словами",
+        "любимые треки пары ставятся как sacred points вечера, а не как случайные пожелания в конце списка",
+    ]
+    jubilee_trends = [
+        "биографическая режиссура сильнее работает через короткие точные истории, чем через линейный пересказ жизни",
+        "уважение к статусу гостей и героя вечера строится через вкус и точность, а не через официоз",
+        "музыкальная логика юбилея должна держать баланс между узнаваемостью и современным качеством подачи",
+        "вовлечение строится через адресность, семейный контекст и наблюдательность, а не через сценическое давление",
+    ]
+
+    sources = [
+        "The Knot, wedding technology and guest-experience trends for 2026 planning logic, проверено 2026-04-15",
+        "Brides, portrait studio and editorial guest-experience trend, проверено 2026-04-15",
+        "Los Angeles Times, wedding entertainment trends and guest-engagement direction, проверено 2026-04-15",
+        "THE WED, wedding content creation and documentary-style storytelling trends, проверено 2026-04-15",
+    ]
+
+    return {
+        "mode": EVENT_AI_MODE,
+        "event_year": event_year,
+        "season": season,
+        "seasonal_logic": seasonal_logic.get(season, seasonal_logic["all-season"]),
+        "applied_market_direction": wedding_trends if is_wedding else jubilee_trends,
+        "dj_market_direction": [
+            "welcome и dinner строятся через curated tone-setting, а не через просто 'спокойную музыку'",
+            "танцпол поднимается волнами: familiar lift -> stylish singalong -> peak -> elegant close",
+            "переход из трогательного блока должен быть ступенчатым, без ломаного эмоционального удара",
+            "сеты должны учитывать возраст, город, площадку и любимые треки пары как драматургические маркеры",
+        ],
+        "host_market_direction": [
+            "ведущий работает как storyteller-editor, а не как человек, объявляющий блоки",
+            "реплики должны звучать как авторский текст под конкретных людей, а не как красивая общая заготовка",
+            "мягкое вовлечение важнее шумной активности: наблюдательность, точность, персональный юмор и уместность",
+        ],
+        "sources_checked_at": "2026-04-15",
+        "sources": sources,
+    }
+
+
+def build_style_bank(questionnaire: dict[str, Any]) -> dict[str, Any]:
+    is_wedding = questionnaire.get("eventType") == "wedding"
+    profile = build_personalization_brief(questionnaire)
+    event_context = parse_event_date_context(questionnaire)
+    return {
+        "mode": EVENT_AI_MODE,
+        "voice_direction": (
+            "expensive editorial romance with wit, nerve and real humanity"
+            if is_wedding
+            else "warm prestige with wit, biography depth and living stage presence"
+        ),
+        "must_sound_like": [
+            "авторская сценическая речь, написанная под конкретных людей",
+            "живой режиссерский текст, а не обзор анкеты",
+            "мягкая интеллектуальная сила без пафоса и канцелярита",
+        ],
+        "must_not_sound_like": [
+            "шаблонная свадебная открытка",
+            "банкетный универсальный текст",
+            "пересказ полей анкеты почти теми же словами",
+            "общие слова про атмосферность, любовь и судьбу без конкретной фактуры",
+        ],
+        "metaphor_rules": [
+            "метафоры должны вытекать из фактуры пары, а не жить отдельно от нее",
+            "если образ не помогает сцене и не усиливает конкретных героев, его не использовать",
+            "в каждом длинном тексте должна быть не только красота, но и мысль, темперамент и режиссерский контроль",
+        ],
+        "personalization_rules": [
+            f"обязательно встроить реальные детали пары: {profile['love_story']}",
+            f"обязательно встроить ценности и внутренний язык пары: {', '.join(profile['values'][:3])}; {profile['nicknames'] or 'личные обращения, если они уместны'}",
+            f"если есть внутренние шутки, использовать их точечно и умно: {profile['inside_jokes'] or 'не выдумывать шутки без опоры на анкету'}",
+            "минимум четыре блока должны содержать детали, которые нельзя перенести в чужую анкету без явной фальши",
+        ],
+        "dj_rules": [
+            "лист диджея строить как реальный sheet по точкам вечера, а не как набор жанров",
+            "обязательные треки и любимые песни клиента указывать в конкретных слотах и с задачей блока",
+            "для каждого большого музыкального участка задавать energy arc, переход и stop list",
+        ],
+        "date_awareness": f"событие запланировано на {event_context['raw_date'] or 'указанную дату'}; использовать рыночную логику именно для {event_context['event_year']} года и сезона {event_context['event_season']}",
     }
 
 
@@ -862,6 +993,8 @@ def build_target_program(questionnaire: dict[str, Any]) -> dict[str, Any]:
     event_type = questionnaire["eventType"]
     is_wedding = event_type == "wedding"
     atmosphere = questionnaire.get("atmosphere") or questionnaire.get("anniversaryAtmosphere") or "теплая, живая, современная"
+    trend_bank = build_trend_bank(questionnaire)
+    style_bank = build_style_bank(questionnaire)
     heroes = (
         f"{questionnaire.get('groomName', '').strip()} и {questionnaire.get('brideName', '').strip()}".strip()
         if is_wedding
@@ -887,18 +1020,22 @@ def build_target_program(questionnaire: dict[str, Any]) -> dict[str, Any]:
         "Тексты ведущего увеличены и переведены в сценичную, метафоричную манеру.",
         "DJ-блок стал инструментом для работы, а не общим пожеланием.",
         "Финальная печатная версия заточена под площадку, а не под презентацию.",
+        f"Trend-bank обновлен под {trend_bank['event_year']} год и сезон {trend_bank['season']}.",
     ]
     program["concept"]["big_idea"] = f"{heroes} в центре не как формальный повод, а как живая история, вокруг которой выстраивается красивый, взрослый, современный {('свадебный' if is_wedding else 'юбилейный')} вечер."
     program["concept"]["main_director_thesis"] = "Вести зал не шумом и не шаблоном, а точной драматургией: через личный смысл, музыкальные волны, уважение к гостям и ощутимый режиссерский вкус."
     program["concept"]["main_emotional_result"] = "Гости должны не просто вспомнить программу, а почувствовать, что прожили цельный, красивый и личный вечер."
     program["concept"]["why_this_event_will_be_remembered"] = "Потому что сценарий опирается на конкретных людей, аккуратную режиссуру, сильные тексты ведущего и живую музыкальную логику, а не на устаревшие шаблоны."
-    program["trend_layer"]["trend_summary"] = "Сценарий держится на современной event-логике: персонализация, мягкое вовлечение, сценическая образность, музыкальная режиссура, отказ от кринжа и ощущение дорогой, живой подачи."
-    program["trend_layer"]["applied_trends"] = [
+    program["trend_layer"]["trend_summary"] = (
+        f"Premium-режим: сценарий собирается с учетом trend-bank для {trend_bank['event_year']} года и сезона {trend_bank['season']}. "
+        f"Рыночная логика: {trend_bank['seasonal_logic']}."
+    )
+    program["trend_layer"]["applied_trends"] = as_list(trend_bank["applied_market_direction"]) + [
         "персонализация через реальные детали героев вечера, а не универсальные формулы",
         "режиссерская сборка вечера волнами вместо однотонного застолья",
         "мягкое вовлечение гостей без давления и без кринжовых конкурсов",
         "музыкальная драматургия как часть сценария, а не отдельная функция DJ",
-        "сильная авторская речь ведущего вместо банальных тостовых клише",
+        f"style-bank: {style_bank['voice_direction']}",
     ]
     program["trend_layer"]["rejected_outdated_patterns"] = [
         "конкурсы ради шума",
@@ -1172,6 +1309,8 @@ def build_stage_system_prompt() -> str:
 Твоя задача: на основе анкеты собрать ГОТОВЫЙ рабочий сценарий для ведущего.
 Это не обзор анкеты и не список советов.
 Это прикладной документ для настоящей работы на площадке.
+Тебе передаются trend-bank и style-bank. Они обязательны к использованию.
+Если дата события указывает на будущий сезон или год, ты ориентируешься на них, а не на устаревшую общую логику.
 
 Критические требования:
 - один основной сильный AI-вызов
@@ -1184,6 +1323,8 @@ def build_stage_system_prompt() -> str:
 - текст должен звучать как авторская речь для реальной сцены, а не как генератор открыток
 - нельзя использовать повторяющиеся заготовки, взаимозаменяемые абзацы и универсальные формулы, которые можно переставить в другую анкету без потери смысла
 - каждая программа должна писаться заново под конкретную анкету, а не быть вариацией одного и того же шаблона
+- запрещено механически пересказывать слова анкеты; сначала сделай выводы, потом пиши
+- сначала анализируй людей, динамику пары, риск-карту и энергетику вечера, и только потом собирай тексты
 - ключевые тексты ведущего должны быть длинными и пригодными к чтению 3-5 минут
 - host_text в каждом блоке тайминга должен содержать не менее 10 интересных метафорических образов
 - DJ guidance должен быть прикладным: трековые ориентиры, ритм захода, связки, что не включать, как поднимать зал, как спасать просадку и как не ломать эмоциональные сцены
@@ -1191,12 +1332,14 @@ def build_stage_system_prompt() -> str:
 
 Как мыслить внутри одного ответа:
 1. Аналитик: собери суть анкеты, конфликтные зоны, обязательные точки, драматургический потенциал.
-2. Trend analyst: отфильтруй устаревшие приемы и определи современную event-логику для такого формата.
-3. Сценарист: построй подробный тайминг и длинные тексты ведущего.
-4. Режиссер: проверь ритм, переходы, музыкальную логику и управление залом.
-5. Критик: найди слабые места и поправь их до финальной версии.
-6. Финальная сборка: перед возвратом молча проверь каждый ключевой блок и перепиши любой фрагмент, который звучит как универсальная заготовка.
-7. Верни только сильный итоговый JSON.
+2. Trend analyst: используй trend-bank с учетом года и даты события; отфильтруй устаревшие приемы и определи актуальную event-логику.
+3. Style editor: используй style-bank, чтобы отрезать банальность, пересказ анкеты и взаимозаменяемые абзацы.
+4. Сценарист: построй подробный тайминг и длинные тексты ведущего.
+5. DJ editor: собери реальный DJ sheet по музыкальным точкам вечера и любимым трекам клиента.
+6. Режиссер: проверь ритм, переходы, музыкальную логику и управление залом.
+7. Критик: найди слабые места и поправь их до финальной версии.
+8. Финальная сборка: перед возвратом молча проверь каждый ключевой блок и перепиши любой фрагмент, который звучит как универсальная заготовка или как механический пересказ анкеты.
+9. Верни только сильный итоговый JSON.
 
 Верни строго JSON с ключами:
 event_passport
@@ -1220,6 +1363,8 @@ def build_generation_user_prompt(questionnaire: dict[str, Any]) -> str:
     analyst_brief = json.dumps(build_event_analyst_brief(questionnaire), ensure_ascii=False, indent=2)
     trend_brief = json.dumps(build_trend_analyst_brief(questionnaire), ensure_ascii=False, indent=2)
     personalization_brief = json.dumps(build_personalization_brief(questionnaire), ensure_ascii=False, indent=2)
+    trend_bank = json.dumps(build_trend_bank(questionnaire), ensure_ascii=False, indent=2)
+    style_bank = json.dumps(build_style_bank(questionnaire), ensure_ascii=False, indent=2)
     return (
         f"Тип мероприятия: {questionnaire['eventType']}\n\n"
         "Анкета:\n"
@@ -1230,18 +1375,25 @@ def build_generation_user_prompt(questionnaire: dict[str, Any]) -> str:
         f"{trend_brief}\n\n"
         "Персональный профиль героев:\n"
         f"{personalization_brief}\n\n"
+        "Trend-bank:\n"
+        f"{trend_bank}\n\n"
+        "Style-bank:\n"
+        f"{style_bank}\n\n"
         "Верни только валидный JSON. Нельзя сокращать сценарий до обзора. "
         "Нужен подробный прикладной документ, по которому ведущий и DJ реально смогут работать на площадке. "
+        "Работай как премиальный креативный помощник, а не как конвертер анкеты в блоки. "
+        "Сначала делай выводы и режиссерские решения, потом пиши итог. "
         "В каждом host_text должно быть не меньше 10 свежих, небанальных метафор. "
         "Каждый host_text и ключевые поля host_script пиши как готовую прямую речь ведущего от первого лица, а не как рекомендации о том, что ему делать. "
-        "DJ guidance должен содержать трековые ориентиры, музыкальную логику, входы, выходы, stop list и rescue-логику. "
+        "DJ guidance должен содержать не только трековые ориентиры, но и полноценный DJ sheet по точкам вечера: welcome, opening, family exit, first lift, dance block 1, dance block 2, late peak, final close. "
         "Нельзя писать общие слова вроде 'что-то атмосферное' или 'поднять зал'; нужны конкретные артистические и трековые ориентиры. "
         "Если в анкете указаны любимые песни или музыкальные предпочтения, обязательно встрои их в DJ-план как конкретные точки сета. "
         "Предложи несколько трендовых фишек ведущего, которые реально можно использовать на площадке без кринжа. "
         "Нельзя выдавать взаимозаменяемый сценарий. Каждая ключевая речь должна быть привязана к реальным деталям анкеты: истории знакомства, предложению, ценностям пары, их личному языку, важным датам, пожеланиям и фактуре гостей. "
         "Минимум в 4 ключевых блоках должны прозвучать конкретные уникальные детали пары, которые невозможно безболезненно переставить в чужую свадьбу. "
         "Запрещено повторять одинаковые композиции фраз между разными анкетами. Если абзац можно вставить в другую заявку почти без изменений, его нужно переписать глубже и конкретнее. "
-        "Нам не нужен шаблон и не нужна настройка. Нам нужен персональный помощник по этой анкете."
+        "Нам не нужен шаблон и не нужна настройка. Нам нужен персональный помощник по этой анкете. "
+        "Учитывай дату события и year-aware trend-bank: если событие в 2026 году, логика должна быть актуальной для 2026, а не для 2025."
     )
 
 
@@ -1315,7 +1467,7 @@ def generate_agent_program(questionnaire: dict[str, Any]) -> dict[str, Any]:
     try:
         response = client.responses.create(
             model=AI_MODEL,
-            reasoning={"effort": "low"},
+            reasoning={"effort": AI_REASONING_EFFORT},
             input=[
                 {"role": "system", "content": build_stage_system_prompt()},
                 {
@@ -1347,7 +1499,7 @@ def generate_agent_program_fast(questionnaire: dict[str, Any]) -> dict[str, Any]
     try:
         response = client.responses.create(
             model=AI_MODEL,
-            reasoning={"effort": "low"},
+            reasoning={"effort": AI_REASONING_EFFORT},
             input=[
                 {"role": "system", "content": build_stage_system_prompt()},
                 {"role": "user", "content": build_generation_user_prompt(questionnaire)},
