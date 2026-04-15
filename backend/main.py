@@ -28,14 +28,20 @@ except Exception:  # pragma: no cover
 load_dotenv()
 
 SUPPORTED_EVENT_TYPES = {"wedding", "jubilee"}
-PROGRAM_SCHEMA_VERSION = 4
+PROGRAM_SCHEMA_VERSION = 5
 EVENT_AI_MODE = os.getenv("EVENT_AI_MODE", "premium").strip().lower()
 AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4" if EVENT_AI_MODE == "premium" else "gpt-5.4-mini")
 AI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "medium" if EVENT_AI_MODE == "premium" else "low").strip()
+OPENAI_DOSSIER_MODEL = os.getenv("OPENAI_DOSSIER_MODEL", AI_MODEL).strip()
+OPENAI_DOSSIER_REASONING = os.getenv("OPENAI_DOSSIER_REASONING", AI_REASONING_EFFORT).strip()
+OPENAI_WRITER_MODEL = os.getenv("OPENAI_WRITER_MODEL", "gpt-5.4-mini" if EVENT_AI_MODE == "premium" else AI_MODEL).strip()
+OPENAI_WRITER_REASONING = os.getenv("OPENAI_WRITER_REASONING", "medium" if EVENT_AI_MODE == "premium" else AI_REASONING_EFFORT).strip()
 STRICT_AI_ONLY = os.getenv("STRICT_AI_ONLY", "true" if EVENT_AI_MODE == "premium" else "false").strip().lower() == "true"
 OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "180" if EVENT_AI_MODE == "premium" else "60"))
 OPENAI_TIMEOUT_RETRY_MODEL = os.getenv("OPENAI_TIMEOUT_RETRY_MODEL", "gpt-5.4-mini" if EVENT_AI_MODE == "premium" else "").strip()
 OPENAI_TIMEOUT_RETRY_REASONING = os.getenv("OPENAI_TIMEOUT_RETRY_REASONING", "low" if EVENT_AI_MODE == "premium" else AI_REASONING_EFFORT).strip()
+OPENAI_POLISH_MODEL = os.getenv("OPENAI_POLISH_MODEL", OPENAI_TIMEOUT_RETRY_MODEL or OPENAI_WRITER_MODEL or AI_MODEL).strip()
+OPENAI_POLISH_REASONING = os.getenv("OPENAI_POLISH_REASONING", OPENAI_TIMEOUT_RETRY_REASONING or OPENAI_WRITER_REASONING or AI_REASONING_EFFORT).strip()
 OPENAI_GATEWAY_RETRIES = int(os.getenv("OPENAI_GATEWAY_RETRIES", "3"))
 OPENAI_GATEWAY_RETRY_DELAY_SECONDS = float(os.getenv("OPENAI_GATEWAY_RETRY_DELAY_SECONDS", "2.5"))
 GENERATION_WATCHDOG_SECONDS = float(os.getenv("GENERATION_WATCHDOG_SECONDS", "420"))
@@ -1624,6 +1630,61 @@ def build_writer_user_prompt(questionnaire: dict[str, Any], dossier: dict[str, A
     )
 
 
+WRITER_CHUNK_SPECS = [
+    ("passport_quality", 42, "Собираем паспорт события и quality panel", "Верни только JSON с ключами event_passport и quality_panel."),
+    ("concept_trend", 46, "Собираем концепцию и trend layer", "Верни только JSON с ключами concept и trend_layer."),
+    ("commands_logic", 50, "Собираем команды ведущему, уточнения и режиссерскую логику", "Верни только JSON с ключами key_host_commands, questions_to_clarify_before_event и director_logic."),
+    ("timeline_opening", 56, "Пишем первые 4 блока сценария", "Верни только JSON с ключом scenario_timeline. Внутри должны быть ровно 4 блока: открытие, первый смысловой разгон, вовлечение, подводка к развитию."),
+    ("timeline_closing", 62, "Пишем вторые 4 блока сценария", "Верни только JSON с ключом scenario_timeline. Внутри должны быть ровно 4 блока: эмоциональное ядро, музыкальный подъем, поздний пик, финал."),
+    ("host_script", 68, "Пишем ключевые тексты ведущего", "Верни только JSON с ключом host_script. Все поля должны быть прямой речью ведущего от первого лица."),
+    ("dj_guidance", 73, "Собираем DJ sheet по предпочтениям пары", "Верни только JSON с ключом dj_guidance. Встрой sacred tracks и реальные музыкальные точки вечера."),
+    ("supporting_sections", 78, "Собираем гостей, риски, план Б и короткую версию", "Верни только JSON с ключами guest_management, risk_map, plan_b и final_print_version."),
+]
+
+
+def build_writer_chunk_user_prompt(
+    questionnaire: dict[str, Any],
+    dossier: dict[str, Any],
+    partial_program: dict[str, Any],
+    chunk_name: str,
+    chunk_instruction: str,
+) -> str:
+    already_written = json.dumps(partial_program, ensure_ascii=False, indent=2) if partial_program else "{}"
+    return (
+        "Анкета:\n"
+        f"{build_questionnaire_context(questionnaire)}\n\n"
+        "Creative dossier:\n"
+        f"{json.dumps(dossier, ensure_ascii=False, indent=2)}\n\n"
+        "Уже написанные части сценария:\n"
+        f"{already_written}\n\n"
+        f"Текущий writer-chunk: {chunk_name}\n"
+        f"{chunk_instruction}\n\n"
+        "Правила chunk-генерации:\n"
+        "- не повторяй композиции, одинаковые первые фразы и одну и ту же метафору между блоками\n"
+        "- превращай деталь анкеты в сценическое решение, а не в пересказ\n"
+        "- если пишешь timeline, каждый блок должен отличаться по задаче, ритму и языку\n"
+        "- если пишешь host_script, он должен усиливать timeline, а не копировать его\n"
+        "- если пишешь dj_guidance, используй любимые треки пары, sacred tracks и конкретные музыкальные точки\n"
+        "- верни только валидный JSON для текущего chunk"
+    )
+
+
+def merge_program_chunk(program: dict[str, Any], chunk: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(program)
+    for key, value in chunk.items():
+        if key == "scenario_timeline" and isinstance(value, list):
+            existing = as_list(merged.get("scenario_timeline"))
+            existing.extend(value)
+            merged["scenario_timeline"] = existing
+        elif isinstance(value, dict) and isinstance(merged.get(key), dict):
+            current = as_dict(merged.get(key))
+            current.update(value)
+            merged[key] = current
+        else:
+            merged[key] = value
+    return merged
+
+
 def build_polish_system_prompt() -> str:
     return """
 Ты — финальный редактор и script doctor.
@@ -1746,19 +1807,28 @@ def generate_creative_dossier(questionnaire: dict[str, Any]) -> dict[str, Any]:
     dossier = request_program_from_openai(
         system_prompt=build_dossier_system_prompt(),
         user_prompt=build_dossier_user_prompt(questionnaire),
-        model=AI_MODEL,
-        reasoning_effort=AI_REASONING_EFFORT,
+        model=OPENAI_DOSSIER_MODEL,
+        reasoning_effort=OPENAI_DOSSIER_REASONING,
     )
     return annotate_dossier(as_dict(dossier))
 
 
-def write_program_from_dossier(questionnaire: dict[str, Any], dossier: dict[str, Any]) -> dict[str, Any]:
-    program = request_program_from_openai(
-        system_prompt=build_stage_system_prompt(),
-        user_prompt=build_writer_user_prompt(questionnaire, dossier),
-        model=AI_MODEL,
-        reasoning_effort=AI_REASONING_EFFORT,
-    )
+def write_program_from_dossier(
+    questionnaire: dict[str, Any],
+    dossier: dict[str, Any],
+    progress_callback: Any | None = None,
+) -> dict[str, Any]:
+    program: dict[str, Any] = {}
+    for chunk_name, percent, status_message, chunk_instruction in WRITER_CHUNK_SPECS:
+        if progress_callback is not None:
+            progress_callback(percent, status_message)
+        chunk = request_program_from_openai(
+            system_prompt=build_stage_system_prompt(),
+            user_prompt=build_writer_chunk_user_prompt(questionnaire, dossier, program, chunk_name, chunk_instruction),
+            model=OPENAI_WRITER_MODEL,
+            reasoning_effort=OPENAI_WRITER_REASONING,
+        )
+        program = merge_program_chunk(program, as_dict(chunk))
     return normalize_program(program, questionnaire)
 
 
@@ -1766,8 +1836,8 @@ def polish_program(questionnaire: dict[str, Any], dossier: dict[str, Any], progr
     polished = request_program_from_openai(
         system_prompt=build_polish_system_prompt(),
         user_prompt=build_polish_user_prompt(questionnaire, dossier, program),
-        model=OPENAI_TIMEOUT_RETRY_MODEL or AI_MODEL,
-        reasoning_effort=OPENAI_TIMEOUT_RETRY_REASONING or AI_REASONING_EFFORT,
+        model=OPENAI_POLISH_MODEL,
+        reasoning_effort=OPENAI_POLISH_REASONING,
     )
     return normalize_program(polished, questionnaire)
 
@@ -2220,7 +2290,19 @@ def run_generation_job(submission_id: str, job_id: str) -> None:
             expected_job_id=job_id,
         )
         with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(write_program_from_dossier, questionnaire, dossier)
+            future = executor.submit(
+                write_program_from_dossier,
+                questionnaire,
+                dossier,
+                lambda percent, message: save_generation_state(
+                    submission_id,
+                    status="running",
+                    stage="writer",
+                    percent=percent,
+                    message=message,
+                    expected_job_id=job_id,
+                ),
+            )
             try:
                 draft_program = future.result(timeout=GENERATION_WATCHDOG_SECONDS)
             except FutureTimeoutError:
@@ -2428,7 +2510,17 @@ def generate_program(submission_id: str) -> dict[str, Any]:
         save_generation_state(submission_id, status="running", stage="dossier", percent=10, message="Собираем creative dossier")
         dossier = generate_creative_dossier(submission["questionnaire"])
         save_generation_state(submission_id, status="running", stage="writer", percent=40, message="Пишем основной сценарий")
-        draft_program = write_program_from_dossier(submission["questionnaire"], dossier)
+        draft_program = write_program_from_dossier(
+            submission["questionnaire"],
+            dossier,
+            lambda percent, message: save_generation_state(
+                submission_id,
+                status="running",
+                stage="writer",
+                percent=percent,
+                message=message,
+            ),
+        )
         save_generation_state(submission_id, status="running", stage="polish", percent=78, message="Шлифуем тексты и DJ sheet")
         program = polish_program(submission["questionnaire"], dossier, draft_program)
         program["_creative_dossier"] = dossier
