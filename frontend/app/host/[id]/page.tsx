@@ -213,6 +213,11 @@ export default function HostDetailPage() {
         </div>
 
         {error ? <div className="rounded-[24px] border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">{error}</div> : null}
+        {generation.status === "ready" && !hasProgram ? (
+          <div className="rounded-[24px] border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">
+            Генерация дошла до финала, но итоговая программа не прошла проверку. Нажмите `Сформировать программу` еще раз.
+          </div>
+        ) : null}
         {generation.status !== "idle" ? (
           <div className="rounded-[24px] border border-[var(--border)] bg-white/80 px-5 py-4 text-sm text-stone-700">
             <div className="flex items-center justify-between gap-4 font-medium text-stone-900">
