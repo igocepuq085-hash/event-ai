@@ -3,17 +3,21 @@ import { SERVER_API_URL, type Submission } from "@/lib/api";
 import { AppShell } from "@/components/shell";
 import { LogoutButton } from "@/components/logout-button";
 
-async function getSubmissions(): Promise<Submission[]> {
-  const response = await fetch(`${SERVER_API_URL}/api/submissions`, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error("Не удалось загрузить заявки");
+async function getSubmissions(): Promise<{ items: Submission[]; error: string }> {
+  try {
+    const response = await fetch(`${SERVER_API_URL}/api/submissions`, { cache: "no-store" });
+    if (!response.ok) {
+      return { items: [], error: "Не удалось загрузить заявки из backend." };
+    }
+    const data = (await response.json()) as { items: Submission[] };
+    return { items: data.items.slice().reverse(), error: "" };
+  } catch {
+    return { items: [], error: "Host-панель открылась, но backend сейчас недоступен." };
   }
-  const data = (await response.json()) as { items: Submission[] };
-  return data.items.slice().reverse();
 }
 
 export default async function HostPage() {
-  const submissions = await getSubmissions();
+  const { items: submissions, error } = await getSubmissions();
 
   return (
     <AppShell>
@@ -28,6 +32,12 @@ export default async function HostPage() {
           </div>
           <LogoutButton />
         </div>
+
+        {error ? (
+          <div className="rounded-[28px] border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700">
+            {error}
+          </div>
+        ) : null}
 
         <div className="grid gap-5">
           {submissions.length === 0 ? (
