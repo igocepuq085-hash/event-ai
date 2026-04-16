@@ -1739,6 +1739,27 @@ def normalize_program(program: dict[str, Any], questionnaire: dict[str, Any]) ->
     return program
 
 
+def finalize_generated_program(
+    program: Any,
+    questionnaire: dict[str, Any],
+    dossier: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    repaired = merge_program_chunk(build_target_program(questionnaire), as_dict(program))
+    repaired = normalize_program(repaired, questionnaire)
+    repaired["_schema_version"] = PROGRAM_SCHEMA_VERSION
+    if dossier is not None:
+        repaired["_creative_dossier"] = dossier
+
+    if is_program_actual(repaired):
+        return repaired
+
+    fallback = build_target_program(questionnaire)
+    fallback["_schema_version"] = PROGRAM_SCHEMA_VERSION
+    if dossier is not None:
+        fallback["_creative_dossier"] = dossier
+    return fallback
+
+
 def annotate_program_source(program: dict[str, Any], *, source: str, note: str = "") -> dict[str, Any]:
     program["_generation_meta"] = {
         "source": source,
@@ -2333,8 +2354,7 @@ def run_generation_job(submission_id: str, job_id: str) -> None:
             except FutureTimeoutError:
                 future.cancel()
                 program = draft_program
-        program["_schema_version"] = PROGRAM_SCHEMA_VERSION
-        program["_creative_dossier"] = dossier
+        program = finalize_generated_program(program, questionnaire, dossier)
         if not is_program_actual(program):
             save_generation_state(
                 submission_id,
@@ -2545,8 +2565,7 @@ def generate_program(submission_id: str) -> dict[str, Any]:
         )
         save_generation_state(submission_id, status="running", stage="polish", percent=78, message="Шлифуем тексты и DJ sheet")
         program = polish_program(submission["questionnaire"], dossier, draft_program)
-        program["_schema_version"] = PROGRAM_SCHEMA_VERSION
-        program["_creative_dossier"] = dossier
+        program = finalize_generated_program(program, submission["questionnaire"], dossier)
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Ошибка генерации программы: {error}") from error
 
