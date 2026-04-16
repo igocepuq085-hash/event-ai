@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { fetchApi, type Submission } from "@/lib/api";
@@ -50,6 +50,7 @@ export default function HostDetailPage() {
   const [error, setError] = useState("");
   const [isDownloading, setIsDownloading] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const pollErrorsRef = useRef(0);
   const id = params.id;
 
   useEffect(() => {
@@ -78,6 +79,7 @@ export default function HostDetailPage() {
     const intervalId = window.setInterval(async () => {
       try {
         const statusData = await fetchApi<GenerationResponse>(`/api/submissions/${id}/generation-status`);
+        pollErrorsRef.current = 0;
         setGeneration(statusData.generation);
         setHasProgram(Boolean(statusData.hasProgram));
         if (statusData.hasProgram || statusData.generation.status === "ready") {
@@ -91,8 +93,11 @@ export default function HostDetailPage() {
           window.clearInterval(intervalId);
         }
       } catch (pollError) {
-        setError(pollError instanceof Error ? pollError.message : "Не удалось обновить статус генерации");
-        window.clearInterval(intervalId);
+        pollErrorsRef.current += 1;
+        if (pollErrorsRef.current >= 4) {
+          setError(pollError instanceof Error ? pollError.message : "Не удалось обновить статус генерации");
+          window.clearInterval(intervalId);
+        }
       }
     }, 2500);
 

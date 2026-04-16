@@ -215,6 +215,167 @@ def clean_fragment(value: str, fallback: str = "") -> str:
     return text or fallback
 
 
+PLACEHOLDER_VALUES = {
+    "",
+    "не указано",
+    "не указана",
+    "не указаны",
+    "n/a",
+    "none",
+    "{}",
+    "[]",
+}
+
+TECHNICAL_TIMELINE_MARKERS = (
+    "основа вечера",
+    "собрать каркас",
+    "базовый блок",
+    "технический блок",
+    "служебный блок",
+)
+
+CORE_TIMELINE_MARKERS = (
+    "открыт",
+    "истори",
+    "ядро",
+    "семейн",
+    "финал",
+)
+
+
+def is_placeholder_text(value: Any) -> bool:
+    if value is None:
+        return True
+    text = clean_fragment(str(value)).lower()
+    return not text or text in PLACEHOLDER_VALUES
+
+
+def has_useful_value(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(has_useful_value(item) for item in value.values())
+    if isinstance(value, list):
+        return any(has_useful_value(item) for item in value)
+    return not is_placeholder_text(value)
+
+
+def clean_text_list(items: list[Any], *, limit: int | None = None) -> list[str]:
+    cleaned = unique_preserve_order([clean_fragment(item) for item in items if has_useful_value(item)])
+    return cleaned[:limit] if limit is not None else cleaned
+
+
+def split_sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?])\s+", clean_fragment(text))
+    return [part.strip() for part in parts if part.strip()]
+
+
+def dedupe_sentences(text: str) -> str:
+    return " ".join(unique_preserve_order(split_sentences(text)))
+
+
+def shorten_secondary_text(text: str, *, max_sentences: int = 3) -> str:
+    sentences = split_sentences(text)
+    if len(sentences) <= max_sentences:
+        return " ".join(sentences)
+    return " ".join(sentences[:max_sentences])
+
+
+def first_questionnaire_value(questionnaire: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = clean_fragment(questionnaire.get(key, ""))
+        if value:
+            return value
+    return ""
+
+
+def build_event_passport_from_questionnaire(questionnaire: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    passport = dict(current)
+    passport["event_type"] = first_questionnaire_value(questionnaire, "eventType") or clean_fragment(current.get("event_type", ""))
+    passport["event_date"] = first_questionnaire_value(questionnaire, "eventDate") or clean_fragment(current.get("event_date", ""))
+    passport["city"] = first_questionnaire_value(questionnaire, "city") or clean_fragment(current.get("city", ""))
+    passport["venue"] = first_questionnaire_value(questionnaire, "venue") or clean_fragment(current.get("venue", ""))
+    passport["timing_anchor"] = first_questionnaire_value(questionnaire, "startTime") or clean_fragment(current.get("timing_anchor", ""))
+    passport["atmosphere"] = first_questionnaire_value(questionnaire, "atmosphere", "anniversaryAtmosphere") or clean_fragment(current.get("atmosphere", ""))
+    passport["style"] = first_questionnaire_value(questionnaire, "references", "hostWishes") or clean_fragment(current.get("style", ""))
+    passport["mandatory_points"] = clean_text_list(
+        list_from_text(questionnaire.get("keyMoments", ""), []) + as_list(current.get("mandatory_points")),
+        limit=8,
+    )
+    passport["hard_bans"] = clean_text_list(
+        list_from_text(questionnaire.get("musicBans", "") + "\n" + questionnaire.get("whatCannotBeDone", ""), [])
+        + as_list(current.get("hard_bans")),
+        limit=10,
+    )
+    return passport
+
+
+DJ_ARTIST_NEIGHBORS = {
+    "ленинград": (["Uma2rman", "Звери", "Браво", "Градусы", "Мумий Тролль"], ["Maroon 5", "The Killers", "DNCE"]),
+    "ногу свело": (["Мумий Тролль", "Би-2", "Сплин", "Звери", "Моральный кодекс"], ["Franz Ferdinand", "The Killers", "Blur"]),
+    "руки вверх": (["Иванушки International", "Дискотека Авария", "Отпетые мошенники", "Гости из будущего"], ["Backstreet Boys", "NSYNC", "Ace of Base"]),
+    "баста": (["JONY", "Miyagi", "HammAli & Navai", "Мот"], ["Drake", "Post Malone", "The Weeknd"]),
+    "кино": (["Би-2", "Сплин", "Агата Кристи", "Мумий Тролль"], ["The Cure", "Depeche Mode", "Editors"]),
+}
+
+
+def infer_related_artists(preferences: list[str]) -> tuple[list[str], list[str]]:
+    related: list[str] = []
+    international: list[str] = []
+    lowered = " ".join(preferences).lower()
+    for key, (local_items, global_items) in DJ_ARTIST_NEIGHBORS.items():
+        if key in lowered:
+            related.extend(local_items)
+            international.extend(global_items)
+    if not related:
+        related = ["Cream Soda", "Моя Мишель", "Therr Maitz", "Zivert", "Браво"]
+    if not international:
+        international = ["Dua Lipa", "Bruno Mars", "Jamiroquai", "Parcels", "Purple Disco Machine"]
+    return clean_text_list(related, limit=8), clean_text_list(international, limit=6)
+
+
+def build_dj_sections(questionnaire: dict[str, Any], dj: dict[str, Any]) -> dict[str, Any]:
+    preferences = extract_music_preferences(questionnaire)
+    related_artists, international = infer_related_artists(preferences)
+    anchors = clean_text_list(as_list(dj.get("special_tracks")) + preferences, limit=8)
+    bans = clean_text_list(
+        as_list(dj.get("stop_list")) + list_from_text(questionnaire.get("musicBans", "") + "\n" + questionnaire.get("whatCannotBeDone", ""), []),
+        limit=10,
+    )
+
+    section_defaults = {
+        "welcome": ("Собрать гостей и посадить атмосферу", "теплый, стильный, ненавязчивый", "90-108 BPM, мягкий грув"),
+        "opening": ("Освободить коридор под голос ведущего", "чистый, уверенный, без перегруза", "спокойный вход с коротким подъемом"),
+        "emotion": ("Поддержать трогательный блок и не сломать его", "светлый, кинематографичный, бережный", "сдержанный pulse без резкого удара"),
+        "dance_1": ("Вывести первый круг на танцпол", "узнаваемый, дружелюбный, без клубной агрессии", "mid-tempo sing-along"),
+        "dance_2": ("Поднять общую энергию", "яркий, плотный, но вкусный", "выше по энергии, но без перегрева"),
+        "dance_3": ("Дать поздний пик без потери вкуса", "праздничный, уверенный, широкий", "пик по плотности и отдаче"),
+        "final": ("Закрыть вечер объединяющим ощущением", "светлый, объединяющий, титровый", "снять пик и оставить послевкусие"),
+    }
+    existing_sections = as_dict(dj.get("sections"))
+    sections: dict[str, Any] = {}
+    for name, (goal, character, tempo) in section_defaults.items():
+        base = as_dict(existing_sections.get(name))
+        tracks = clean_text_list(
+            as_list(base.get("track_refs"))
+            + list_from_text(str(base.get("track_refs_text", "")), [])
+            + anchors,
+            limit=8,
+        )
+        sections[name] = {
+            "goal": clean_fragment(base.get("goal", ""), goal),
+            "music_character": clean_fragment(base.get("music_character", ""), character),
+            "tempo_logic": clean_fragment(base.get("tempo_logic", ""), tempo),
+            "track_refs": tracks,
+            "related_artists": clean_text_list(as_list(base.get("related_artists")) + related_artists, limit=8),
+            "international_analogs": clean_text_list(as_list(base.get("international_analogs")) + international, limit=6),
+            "avoid": clean_text_list(as_list(base.get("avoid")) + bans, limit=8),
+            "transition": clean_fragment(base.get("transition", ""), "Переход делай по энергии и смыслу, без резкого жанрового обрыва."),
+        }
+    dj["sections"] = sections
+    dj["special_tracks"] = anchors
+    dj["stop_list"] = bans
+    return dj
+
+
 def build_personalization_brief(questionnaire: dict[str, Any]) -> dict[str, Any]:
     is_wedding = questionnaire.get("eventType") == "wedding"
     heroes = (
@@ -763,51 +924,89 @@ def extract_music_preferences(questionnaire: dict[str, Any]) -> list[str]:
 
 
 def build_guest_management_from_questionnaire(questionnaire: dict[str, Any]) -> dict[str, Any]:
-    important = unique_preserve_order(
-        list_from_text(questionnaire.get("importantGuests", ""), [])
-        + list_from_text(questionnaire.get("guestsList", ""), [])
+    guest_lines = clean_text_list(
+        list_from_text(questionnaire.get("guestsList", ""), []),
+        limit=20,
     )
-    sensitive = unique_preserve_order(
+    important = clean_text_list(
+        list_from_text(questionnaire.get("importantGuests", ""), [])
+        + guest_lines,
+        limit=12,
+    )
+    sensitive = clean_text_list(
         list_from_text(
             questionnaire.get("conflictTopics", "") + "\n" + questionnaire.get("jubileeConflictTopics", ""),
             [],
-        )
+        ),
+        limit=10,
     )
-    active_people = important[:6] if important else ["Опорные гости не выделены, уточнить 5-6 самых включенных людей."]
+    risky_people = clean_text_list(
+        [
+            item
+            for item in guest_lines
+            if any(marker in item.lower() for marker in ["конфликт", "сложно", "обид", "осторож", "ревнив", "пьян", "не трог"])
+        ],
+        limit=8,
+    )
+    do_not_involve_people = clean_text_list(
+        [
+            item
+            for item in guest_lines
+            if any(marker in item.lower() for marker in ["не вовлек", "не поднимать", "не трог", "лучше не"])
+        ],
+        limit=8,
+    )
+    active_people = [item for item in important if item not in risky_people and item not in do_not_involve_people][:6]
+    if not active_people:
+        active_people = ["Опорные гости не выделены, уточнить 5-6 самых включенных людей."]
     return {
         "active_people": active_people,
-        "shy_people": ["Скромных и неизвестных ведущему гостей не вытаскивать без личного контакта и явного согласия."],
         "important_people": important[:10] if important else ["Важные гости не перечислены в анкете, уточнить поименно у заказчика."],
-        "do_not_involve": sensitive[:8] if sensitive else ["Не вовлекать конфликтных, уставших и неготовых к публичности гостей."],
-        "sensitive_people_or_topics": sensitive[:10] if sensitive else ["Чувствительные темы отдельно не перечислены, сверить их перед площадкой."],
+        "risky_people": risky_people,
+        "do_not_involve_people": do_not_involve_people,
+        "sensitive_topics": sensitive if sensitive else ["Чувствительные темы отдельно не перечислены, сверить их перед площадкой."],
         "management_notes": [
             "Сначала работать через опорных гостей, потом расширять вовлечение на зал.",
             "Не использовать гостей как реквизит ради активности.",
             "Если в анкете есть имена и связи, ведущий должен опираться на них адресно, а не говорить абстрактно про зал.",
         ],
+        "do_not_involve": do_not_involve_people or ["Не вовлекать конфликтных, уставших и неготовых к публичности гостей."],
+        "sensitive_people_or_topics": sensitive if sensitive else ["Чувствительные темы отдельно не перечислены, сверить их перед площадкой."],
     }
 
 
 def refine_program_payload(program: dict[str, Any], questionnaire: dict[str, Any]) -> dict[str, Any]:
     preferred_tracks = extract_music_preferences(questionnaire)
+    program["event_passport"] = build_event_passport_from_questionnaire(questionnaire, as_dict(program.get("event_passport")))
     timeline = as_list(program.get("scenario_timeline"))
-    keep_titles = {
-        "Сбор гостей и тонкий welcome",
-        "Главное открытие вечера",
-        "Первое смысловое ядро",
-        "Семейный и эмоциональный блок",
-        "Сюрприз или специальный акцент",
-        "Танцевальная волна",
-        "Финал и закрытие вечера",
-    }
     if timeline:
         filtered = []
         seen_titles: set[str] = set()
-        for block in timeline:
+        for index, block in enumerate(timeline):
             block_data = as_dict(block)
-            title = str(block_data.get("block_title", "")).strip()
-            if not title or title.lower() in seen_titles:
+            title = clean_fragment(block_data.get("block_title", ""))
+            if (
+                not title
+                or title.lower() in seen_titles
+                or any(marker in title.lower() for marker in TECHNICAL_TIMELINE_MARKERS)
+            ):
                 continue
+            if not has_useful_value(block_data.get("host_text")) and not has_useful_value(block_data.get("what_happens")):
+                continue
+            block_data["block_title"] = title
+            block_data["host_text"] = dedupe_sentences(str(block_data.get("host_text", "")))
+            if not any(marker in title.lower() for marker in CORE_TIMELINE_MARKERS):
+                block_data["host_text"] = shorten_secondary_text(block_data["host_text"], max_sentences=3)
+            block_data["block_purpose"] = dedupe_sentences(str(block_data.get("block_purpose", "")))
+            block_data["what_happens"] = dedupe_sentences(str(block_data.get("what_happens", "")))
+            block_data["host_action"] = dedupe_sentences(str(block_data.get("host_action", "")))
+            block_data["transition"] = dedupe_sentences(str(block_data.get("transition", "")))
+            block_data["voice_mode"] = (
+                "opening_voice" if index == 0 else
+                "final_voice" if index == len(timeline) - 1 else
+                "dance_voice" if "танц" in title.lower() else
+                "story_voice"
+            )
             seen_titles.add(title.lower())
             filtered.append(block_data)
         if filtered:
@@ -826,15 +1025,7 @@ def refine_program_payload(program: dict[str, Any], questionnaire: dict[str, Any
         ]
         if "special_tracks" not in dj:
             dj["special_tracks"] = preferred_tracks[:6]
-        dj["set_plan"] = [
-            f"Welcome: мягкий вход и сбор атмосферы. Опорные треки: {chosen}.",
-            "Opening: оставить чистый музыкальный коридор под голос ведущего.",
-            "Family / emotion exit: выходить через warm mid-tempo, без резкого удара.",
-            "Dance 1: дать узнаваемые mid-energy хиты, чтобы вывести первый круг.",
-            "Dance 2: поднимать sing-along и disco/pop магниты только после включения зала.",
-            "Final: закрывать вечер объединяющим треком, а не случайным клубным добивом.",
-        ]
-        program["dj_guidance"] = dj
+    program["dj_guidance"] = build_dj_sections(questionnaire, dj)
 
     trend_features = [
         "Фишка ведущего: собрать 3 короткие голосовые реплики от гостей заранее и вшить их в эмоциональный блок как живой аудио-монтаж.",
@@ -849,11 +1040,38 @@ def refine_program_payload(program: dict[str, Any], questionnaire: dict[str, Any
     current_guest_management.update({k: v for k, v in guest_management.items() if v})
     program["guest_management"] = current_guest_management
 
+    script = as_dict(program.get("host_script"))
+    for field in [
+        "opening_main",
+        "opening_short",
+        "welcome_line",
+        "first_core_intro",
+        "family_block_intro",
+        "surprise_intro",
+        "dance_block_intro",
+        "final_block_intro",
+        "closing_words",
+    ]:
+        if has_useful_value(script.get(field)):
+            script[field] = dedupe_sentences(str(script.get(field)))
+    program["host_script"] = script
+
+    program["risk_map"] = [
+        item
+        for item in as_list(program.get("risk_map"))
+        if has_useful_value(as_dict(item).get("risk")) and has_useful_value(as_dict(item).get("how_to_prevent"))
+    ]
+    program["plan_b"] = [
+        item
+        for item in as_list(program.get("plan_b"))
+        if has_useful_value(as_dict(item).get("situation")) and has_useful_value(as_dict(item).get("solution"))
+    ]
+
     final_print = as_dict(program.get("final_print_version"))
-    final_print["timeline_short"] = [
+    final_print["timeline_short"] = clean_text_list([
         f"{as_dict(item).get('time_from', '')}-{as_dict(item).get('time_to', '')}: {as_dict(item).get('block_title', '')}"
         for item in as_list(program.get("scenario_timeline"))
-    ]
+    ], limit=8)
     program["final_print_version"] = final_print
     return program
 
@@ -1679,7 +1897,8 @@ def build_writer_user_prompt(questionnaire: dict[str, Any], dossier: dict[str, A
 
 WRITER_CHUNK_SPECS = [
     ("passport_quality", 42, "Собираем паспорт события и quality panel", "Верни только JSON с ключами event_passport и quality_panel."),
-    ("concept_trend", 46, "Собираем концепцию и trend layer", "Верни только JSON с ключами concept и trend_layer."),
+    ("concept_core", 46, "Собираем только смысловое ядро вечера", "Верни только JSON с ключом concept. Не раздувай блок и не пересказывай анкету."),
+    ("trend_core", 48, "Собираем только внутренний trend layer", "Верни только JSON с ключом trend_layer. Без повторов концепции."),
     ("commands_logic", 50, "Собираем команды ведущему, уточнения и режиссерскую логику", "Верни только JSON с ключами key_host_commands, questions_to_clarify_before_event и director_logic."),
     ("timeline_opening", 56, "Пишем первые 4 блока сценария", "Верни только JSON с ключом scenario_timeline. Внутри должны быть ровно 4 блока: открытие, первый смысловой разгон, вовлечение, подводка к развитию."),
     ("timeline_closing", 62, "Пишем вторые 4 блока сценария", "Верни только JSON с ключом scenario_timeline. Внутри должны быть ровно 4 блока: эмоциональное ядро, музыкальный подъем, поздний пик, финал."),
@@ -1720,9 +1939,15 @@ def build_writer_chunk_user_prompt(
         "Правила chunk-генерации:\n"
         "- не повторяй композиции, одинаковые первые фразы и одну и ту же метафору между блоками\n"
         "- превращай деталь анкеты в сценическое решение, а не в пересказ\n"
+        "- не строй весь сценарий на одной образной системе; соседние большие блоки должны звучать по-разному\n"
+        "- используй 4 режима речи: opening_voice — ярко и коротко; story_voice — тепло и лично; dance_voice — коротко и ритмично; final_voice — светло и ясно\n"
+        "- длинные тексты оставляй только для опорных блоков: открытие, история/ядро, эмоция, финал; второстепенные блоки делай короче и прикладнее\n"
+        "- не создавай служебные тайминг-блоки вроде 'Основа вечера', 'Собрать каркас', 'Базовый блок'\n"
         "- если пишешь timeline, каждый блок должен отличаться по задаче, ритму и языку\n"
         "- если пишешь host_script, он должен усиливать timeline, а не копировать его\n"
-        "- если пишешь dj_guidance, используй любимые треки пары, sacred tracks и конкретные музыкальные точки\n"
+        "- если пишешь dj_guidance, используй любимые треки пары только как вкусовые якоря и подбирай похожих артистов по вайбу, темпу, плотности и возрасту аудитории\n"
+        "- DJ sheet должен иметь фиксированные секции welcome/opening/emotion/dance_1/dance_2/dance_3/final и не повторять одни и те же формулы\n"
+        "- в работе с гостями разделяй active_people, important_people, risky_people, do_not_involve_people и sensitive_topics\n"
         "- верни только валидный JSON для текущего chunk"
     )
 
@@ -1797,7 +2022,10 @@ def build_polish_system_prompt() -> str:
 Что улучшить:
 - убрать канцелярит и шаблонные куски
 - усилить личные детали пары
-- проверить, что DJ guidance реально привязан к предпочтениям клиента
+- убрать пустые секции, строки "Не указано", дубли строк и дубли смыслов
+- проверить, что соседние большие host_text не живут в одной и той же образной системе
+- сократить второстепенные блоки и оставить длинные тексты только у опорных сцен
+- проверить, что DJ guidance реально привязан к предпочтениям клиента и не повторяет одни и те же формулы
 - сделать тексты ведущего более пригодными к живому произнесению
 - сохранить структуру и прикладность документа
 """
@@ -1863,18 +2091,25 @@ def normalize_program(program: dict[str, Any], questionnaire: dict[str, Any]) ->
             {
                 "time_from": timing_anchor,
                 "time_to": timing_anchor,
-                "block_title": "Основа вечера",
-                "block_purpose": "Собрать рабочий каркас сценария для ведущего.",
-                "what_happens": "Ведущий открывает вечер и задает логику дальнейшего развития.",
-                "host_action": "Держать тон, внимание зала и мягко вести к следующим блокам.",
-                "host_text": "Добрый вечер. Сегодня мы собираем не формальный набор блоков, а живую историю этого события.",
-                "dj_task": "Держать нейтральную аккуратную подложку без резких входов.",
-                "director_move": "Сначала собрать внимание, затем расширять драматургию.",
-                "risk_control": "Не торопить зал и не перегружать старт объявлениями.",
-                "transition": "После открытия перейти к первому смысловому блоку.",
+                "block_title": "Открытие вечера",
+                "block_purpose": "Собрать внимание зала и задать первую интонацию вечера.",
+                "what_happens": "Ведущий спокойно открывает вечер и проводит гостей в первую смысловую точку.",
+                "host_action": "Собрать внимание, держать темп и не перегружать старт лишней литературой.",
+                "host_text": "Добрый вечер. Сегодня мы не пролистываем набор формальностей, а собираем вечер, в котором у каждого блока есть смысл, ритм и человеческое тепло.",
+                "dj_task": "Держать чистый музыкальный коридор без резких входов.",
+                "director_move": "Начать с собранного открытия и мягко перевести в первую опорную сцену.",
+                "risk_control": "Не перегружать старт объявлениями и не спорить с залом по энергии.",
+                "transition": "После открытия перевести внимание в первый содержательный блок.",
             }
         ]
     return program
+
+
+def post_process_program(program: dict[str, Any], questionnaire: dict[str, Any]) -> dict[str, Any]:
+    processed = normalize_program(dict(program), questionnaire)
+    processed = refine_program_payload(processed, questionnaire)
+    processed = normalize_program(processed, questionnaire)
+    return processed
 
 
 def finalize_generated_program(
@@ -1882,9 +2117,7 @@ def finalize_generated_program(
     questionnaire: dict[str, Any],
     dossier: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    repaired = normalize_program(as_dict(program), questionnaire)
-    repaired = refine_program_payload(repaired, questionnaire)
-    repaired = normalize_program(repaired, questionnaire)
+    repaired = post_process_program(as_dict(program), questionnaire)
     repaired["_schema_version"] = PROGRAM_SCHEMA_VERSION
     if dossier is not None:
         repaired["_creative_dossier"] = dossier
@@ -1892,7 +2125,7 @@ def finalize_generated_program(
     if is_program_actual(repaired):
         return repaired
 
-    fallback = normalize_program({}, questionnaire)
+    fallback = post_process_program({}, questionnaire)
     fallback["_schema_version"] = PROGRAM_SCHEMA_VERSION
     if dossier is not None:
         fallback["_creative_dossier"] = dossier
@@ -2223,23 +2456,34 @@ def as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def add_label_value_if_useful(document: Document, label: str, value: Any) -> bool:
+    if not has_useful_value(value):
+        return False
+    add_label_value(document, label, value)
+    return True
+
+
+def add_list_if_useful(document: Document, title: str, items: list[Any]) -> bool:
+    cleaned = clean_text_list(items)
+    if not cleaned:
+        return False
+    document.add_paragraph(title)
+    add_list(document, cleaned)
+    return True
+
+
 def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
     questionnaire = submission["questionnaire"]
     labels = get_questionnaire_labels()
+    program = post_process_program(program, questionnaire)
 
     document = Document()
-    document.add_heading("Event AI: анкета и программа ведущего", 0)
+    document.add_heading("Event AI: рабочий сценарий", 0)
     add_label_value(document, "ID заявки", submission["id"])
     add_label_value(document, "Создано", submission["created_at"])
 
-    document.add_heading("1. Анкета клиента", level=1)
-    for key, label in labels.items():
-        add_label_value(document, label, questionnaire.get(key, ""))
-
-    document.add_heading("2. Сценарий ведущего", level=1)
-
     passport = as_dict(program.get("event_passport"))
-    document.add_heading("2.1 Паспорт события", level=2)
+    document.add_heading("1. Паспорт события", level=1)
     for field, title in [
         ("event_type", "Тип"),
         ("city", "Город"),
@@ -2249,41 +2493,25 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
         ("style", "Стиль"),
         ("timing_anchor", "Тайминговый якорь"),
     ]:
-        add_label_value(document, title, passport.get(field, ""))
-    document.add_paragraph("Обязательные точки:")
-    add_list(document, as_list(passport.get("mandatory_points")))
-    document.add_paragraph("Запреты:")
-    add_list(document, as_list(passport.get("hard_bans")))
+        add_label_value_if_useful(document, title, passport.get(field, ""))
+    add_list_if_useful(document, "Обязательные точки:", as_list(passport.get("mandatory_points")))
+    add_list_if_useful(document, "Запреты:", as_list(passport.get("hard_bans")))
 
-    concept = as_dict(program.get("concept"))
-    document.add_heading("2.2 Концепция вечера", level=2)
-    for field, title in [
-        ("big_idea", "Большая идея"),
-        ("main_director_thesis", "Режиссерский тезис"),
-        ("main_emotional_result", "Эмоциональный результат"),
-        ("why_this_event_will_be_remembered", "Почему вечер запомнится"),
-    ]:
-        add_label_value(document, title, concept.get(field, ""))
+    host_commands = unique_preserve_order(as_list(program.get("key_host_commands")))[:14]
+    if host_commands:
+        document.add_heading("2. Ключевые команды ведущему", level=1)
+        add_list(document, host_commands)
 
-    document.add_heading("2.3 Команды ведущему", level=2)
-    add_list(document, unique_preserve_order(as_list(program.get("key_host_commands")))[:14])
+    questions = unique_preserve_order(as_list(program.get("questions_to_clarify_before_event")))
+    if questions:
+        document.add_heading("3. Что уточнить до мероприятия", level=1)
+        add_list(document, questions)
 
-    document.add_heading("2.4 Что уточнить до мероприятия", level=2)
-    add_list(document, unique_preserve_order(as_list(program.get("questions_to_clarify_before_event"))))
-
-    logic = as_dict(program.get("director_logic"))
-    document.add_heading("2.5 Режиссерская логика вечера", level=2)
-    for field, title in [
-        ("opening_logic", "Открытие"),
-        ("development_logic", "Развитие"),
-        ("family_or_core_emotional_logic", "Эмоциональное ядро"),
-        ("final_logic", "Финал"),
-    ]:
-        add_label_value(document, title, logic.get(field, ""))
-
-    document.add_heading("2.6 Пошаговый тайминг", level=2)
+    document.add_heading("4. Пошаговый тайминг", level=1)
     for index, block in enumerate(as_list(program.get("scenario_timeline")), start=1):
         block = as_dict(block)
+        if not has_useful_value(block):
+            continue
         document.add_paragraph(f"{index}. {block.get('time_from', '')} - {block.get('time_to', '')}: {block.get('block_title', '')}")
         for field, title in [
             ("block_purpose", "Цель"),
@@ -2293,52 +2521,97 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
             ("director_move", "Режиссерский ход"),
             ("transition", "Переход"),
         ]:
-            add_label_value(document, title, block.get(field, ""))
+            add_label_value_if_useful(document, title, block.get(field, ""))
+
+    host_script = as_dict(program.get("host_script"))
+    useful_host_script = {
+        "opening_main": "Opening main",
+        "opening_short": "Opening short",
+        "welcome_line": "Welcome line",
+        "first_core_intro": "First core intro",
+        "family_block_intro": "Family block intro",
+        "surprise_intro": "Surprise intro",
+        "dance_block_intro": "Dance block intro",
+        "final_block_intro": "Final block intro",
+        "closing_words": "Closing words",
+    }
+    if any(has_useful_value(host_script.get(field)) for field in useful_host_script):
+        document.add_heading("5. Отдельные тексты ведущего", level=1)
+        for field, title in useful_host_script.items():
+            add_label_value_if_useful(document, title, host_script.get(field, ""))
 
     dj = as_dict(program.get("dj_guidance"))
-    document.add_heading("2.7 DJ sheet", level=2)
-    add_label_value(document, "Общая музыкальная логика", dj.get("overall_music_policy", ""))
-    document.add_paragraph("Sacred tracks / обязательные ориентиры:")
-    add_list(document, unique_preserve_order(as_list(dj.get("special_tracks"))))
-    document.add_paragraph("Сет по точкам вечера:")
-    set_plan = as_list(dj.get("set_plan"))
-    if set_plan:
-        add_list(document, unique_preserve_order(set_plan))
-    else:
-        for field in [
-            "welcome_music",
-            "opening_music",
-            "emotional_blocks_music",
-            "dance_block_1",
-            "dance_block_2",
-            "dance_block_3",
-            "final_block_music",
-            "final_music",
+    if has_useful_value(dj):
+        document.add_heading("6. DJ sheet", level=1)
+        add_label_value_if_useful(document, "Общая музыкальная логика", dj.get("overall_music_policy", ""))
+        add_list_if_useful(document, "Sacred tracks:", as_list(dj.get("special_tracks")))
+        for section_name, section_title in [
+            ("welcome", "Welcome"),
+            ("opening", "Opening"),
+            ("emotion", "Emotion"),
+            ("dance_1", "Dance 1"),
+            ("dance_2", "Dance 2"),
+            ("dance_3", "Dance 3"),
+            ("final", "Final"),
         ]:
-            if str(dj.get(field, "")).strip():
-                document.add_paragraph(str(dj.get(field, "")).strip(), style="List Bullet")
-    document.add_paragraph("Stop list:")
-    add_list(document, unique_preserve_order(as_list(dj.get("stop_list"))))
-    document.add_paragraph("Технические заметки:")
-    add_list(document, unique_preserve_order(as_list(dj.get("technical_notes"))))
+            section = as_dict(as_dict(dj.get("sections")).get(section_name))
+            if not has_useful_value(section):
+                continue
+            document.add_paragraph(section_title)
+            add_label_value_if_useful(document, "Цель блока", section.get("goal"))
+            add_label_value_if_useful(document, "Музыкальный характер", section.get("music_character"))
+            add_label_value_if_useful(document, "Темп / ритмическая логика", section.get("tempo_logic"))
+            add_list_if_useful(document, "Треки-ориентиры:", as_list(section.get("track_refs")))
+            add_list_if_useful(document, "Похожие артисты:", as_list(section.get("related_artists")))
+            add_list_if_useful(document, "Международные аналоги:", as_list(section.get("international_analogs")))
+            add_list_if_useful(document, "Чего избегать:", as_list(section.get("avoid")))
+            add_label_value_if_useful(document, "Переход", section.get("transition"))
+        add_list_if_useful(document, "Stop list:", as_list(dj.get("stop_list")))
+        add_list_if_useful(document, "Технические заметки:", as_list(dj.get("technical_notes")))
 
     guest_management = as_dict(program.get("guest_management"))
-    document.add_heading("2.8 Работа с гостями", level=2)
-    for field, title in [
-        ("important_people", "Важные гости"),
-        ("active_people", "Кого можно поднимать первыми"),
-        ("do_not_involve", "Кого не вовлекать"),
-        ("sensitive_people_or_topics", "Чувствительные темы и фигуры"),
-        ("management_notes", "Рабочие заметки"),
-    ]:
-        document.add_paragraph(f"{title}:")
-        add_list(document, unique_preserve_order(as_list(guest_management.get(field))))
+    if has_useful_value(guest_management):
+        document.add_heading("7. Работа с гостями", level=1)
+        for field, title in [
+            ("active_people", "Кого можно поднимать первыми"),
+            ("important_people", "Важные гости"),
+            ("risky_people", "Рискованные гости"),
+            ("do_not_involve_people", "Кого не вовлекать"),
+            ("sensitive_topics", "Чувствительные темы"),
+            ("management_notes", "Рабочие заметки"),
+        ]:
+            add_list_if_useful(document, f"{title}:", as_list(guest_management.get(field)))
 
-    document.add_heading("2.9 План Б", level=2)
-    for item in as_list(program.get("plan_b")):
-        item = as_dict(item)
-        add_label_value(document, "Ситуация", item.get("situation", ""))
-        add_label_value(document, "Решение", item.get("solution", ""))
+    risks = [as_dict(item) for item in as_list(program.get("risk_map")) if has_useful_value(item)]
+    if risks:
+        document.add_heading("8. Риски", level=1)
+        for item in risks:
+            add_label_value_if_useful(document, "Риск", item.get("risk"))
+            add_label_value_if_useful(document, "Почему важен", item.get("why_it_matters"))
+            add_label_value_if_useful(document, "Как предотвратить", item.get("how_to_prevent"))
+            add_label_value_if_useful(document, "Что делать, если сработало", item.get("what_to_do_if_triggered"))
+
+    plans = [as_dict(item) for item in as_list(program.get("plan_b")) if has_useful_value(item)]
+    if plans:
+        document.add_heading("9. План Б", level=1)
+        for item in plans:
+            add_label_value_if_useful(document, "Ситуация", item.get("situation"))
+            add_label_value_if_useful(document, "Решение", item.get("solution"))
+
+    final_print = as_dict(program.get("final_print_version"))
+    if has_useful_value(final_print):
+        document.add_heading("10. Краткая версия для печати", level=1)
+        add_label_value_if_useful(document, "Краткое резюме", final_print.get("summary"))
+        add_list_if_useful(document, "Короткий таймлайн:", as_list(final_print.get("timeline_short")))
+        add_list_if_useful(document, "Must do:", as_list(final_print.get("must_do")))
+        add_list_if_useful(document, "Must not do:", as_list(final_print.get("must_not_do")))
+        add_list_if_useful(document, "Фокус ведущего:", as_list(final_print.get("host_focus")))
+        add_list_if_useful(document, "Фокус диджея:", as_list(final_print.get("dj_focus")))
+
+    document.add_heading("11. Полная анкета клиента", level=1)
+    for key, label in labels.items():
+        if has_useful_value(questionnaire.get(key, "")):
+            add_label_value(document, label, questionnaire.get(key, ""))
 
     buffer = BytesIO()
     document.save(buffer)
