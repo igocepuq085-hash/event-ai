@@ -1714,7 +1714,28 @@ def build_polish_user_prompt(questionnaire: dict[str, Any], dossier: dict[str, A
 
 
 def normalize_program(program: dict[str, Any], questionnaire: dict[str, Any]) -> dict[str, Any]:
-    fallback = build_target_program(questionnaire)
+    fallback = {
+        "event_passport": {
+            "event_type": questionnaire.get("eventType", ""),
+            "event_date": questionnaire.get("eventDate", ""),
+            "city": questionnaire.get("city", ""),
+            "venue": questionnaire.get("venue", ""),
+            "timing_anchor": questionnaire.get("startTime", ""),
+        },
+        "quality_panel": {},
+        "concept": {},
+        "trend_layer": {},
+        "key_host_commands": [],
+        "questions_to_clarify_before_event": [],
+        "director_logic": {},
+        "scenario_timeline": [],
+        "host_script": {},
+        "dj_guidance": {},
+        "guest_management": {},
+        "risk_map": [],
+        "plan_b": [],
+        "final_print_version": {},
+    }
     for key, value in fallback.items():
         if key not in program or not program[key]:
             program[key] = value
@@ -1744,7 +1765,8 @@ def finalize_generated_program(
     questionnaire: dict[str, Any],
     dossier: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    repaired = merge_program_chunk(build_target_program(questionnaire), as_dict(program))
+    repaired = normalize_program(as_dict(program), questionnaire)
+    repaired = refine_program_payload(repaired, questionnaire)
     repaired = normalize_program(repaired, questionnaire)
     repaired["_schema_version"] = PROGRAM_SCHEMA_VERSION
     if dossier is not None:
@@ -1753,7 +1775,7 @@ def finalize_generated_program(
     if is_program_actual(repaired):
         return repaired
 
-    fallback = build_target_program(questionnaire)
+    fallback = normalize_program({}, questionnaire)
     fallback["_schema_version"] = PROGRAM_SCHEMA_VERSION
     if dossier is not None:
         fallback["_creative_dossier"] = dossier
@@ -1895,7 +1917,11 @@ def is_program_actual(program: Any) -> bool:
         "plan_b",
         "final_print_version",
     }
-    return required_keys.issubset(program.keys()) and is_program_detailed(program)
+    if not required_keys.issubset(program.keys()):
+        return False
+    if not isinstance(program.get("scenario_timeline"), list) or len(program.get("scenario_timeline", [])) < 1:
+        return False
+    return True
 
 
 def generate_agent_program(questionnaire: dict[str, Any]) -> dict[str, Any]:
