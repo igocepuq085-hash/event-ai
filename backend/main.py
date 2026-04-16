@@ -1641,6 +1641,17 @@ WRITER_CHUNK_SPECS = [
     ("supporting_sections", 78, "Собираем гостей, риски, план Б и короткую версию", "Верни только JSON с ключами guest_management, risk_map, plan_b и final_print_version."),
 ]
 
+DOSSIER_CHUNK_SPECS = [
+    ("story_dna", 12, "Собираем драматургическое ядро пары", "Верни только JSON с ключами central_metaphor, supporting_images, unique_hook, couple_dynamics, tone_profile, forbidden_cliches, personalization_mandates."),
+    ("music_guest_dna", 18, "Собираем музыкальную и гостевую ДНК вечера", "Верни только JSON с ключами sacred_tracks, music_map, guest_energy_map, sensitive_zones, host_trend_features, staging_priorities."),
+]
+
+POLISH_CHUNK_SPECS = [
+    ("polish_timeline", 82, "Шлифуем таймлайн и прямую речь ведущего", "Верни только JSON с ключами scenario_timeline и host_script. Усиль персонализацию и убери пересказ анкеты."),
+    ("polish_dj", 88, "Шлифуем DJ sheet и музыкальные переходы", "Верни только JSON с ключом dj_guidance. Сделай материал конкретным по трекам, переходам и rescue-логике."),
+    ("polish_support", 94, "Шлифуем риски, план Б и печатную версию", "Верни только JSON с ключами guest_management, risk_map, plan_b и final_print_version."),
+]
+
 
 def build_writer_chunk_user_prompt(
     questionnaire: dict[str, Any],
@@ -1665,6 +1676,50 @@ def build_writer_chunk_user_prompt(
         "- если пишешь timeline, каждый блок должен отличаться по задаче, ритму и языку\n"
         "- если пишешь host_script, он должен усиливать timeline, а не копировать его\n"
         "- если пишешь dj_guidance, используй любимые треки пары, sacred tracks и конкретные музыкальные точки\n"
+        "- верни только валидный JSON для текущего chunk"
+    )
+
+
+def build_dossier_chunk_user_prompt(
+    questionnaire: dict[str, Any],
+    partial_dossier: dict[str, Any],
+    chunk_name: str,
+    chunk_instruction: str,
+) -> str:
+    return (
+        "Анкета:\n"
+        f"{build_questionnaire_context(questionnaire)}\n\n"
+        "Уже собранный dossier:\n"
+        f"{json.dumps(partial_dossier, ensure_ascii=False, indent=2)}\n\n"
+        f"Текущий dossier-chunk: {chunk_name}\n"
+        f"{chunk_instruction}\n\n"
+        "Правила:\n"
+        "- не пересказывай анкету; делай выводы\n"
+        "- ищи центральную метафору, драматургию и прикладные выводы\n"
+        "- верни только валидный JSON для текущего chunk"
+    )
+
+
+def build_polish_chunk_user_prompt(
+    questionnaire: dict[str, Any],
+    dossier: dict[str, Any],
+    program: dict[str, Any],
+    chunk_name: str,
+    chunk_instruction: str,
+) -> str:
+    return (
+        "Анкета:\n"
+        f"{build_questionnaire_context(questionnaire)}\n\n"
+        "Creative dossier:\n"
+        f"{json.dumps(dossier, ensure_ascii=False, indent=2)}\n\n"
+        "Текущий сценарий:\n"
+        f"{json.dumps(program, ensure_ascii=False, indent=2)}\n\n"
+        f"Текущий polish-chunk: {chunk_name}\n"
+        f"{chunk_instruction}\n\n"
+        "Правила:\n"
+        "- меняй только нужные секции\n"
+        "- не переписывай весь документ целиком\n"
+        "- усиливай персонализацию и конкретику\n"
         "- верни только валидный JSON для текущего chunk"
     )
 
@@ -1861,14 +1916,22 @@ def request_program_from_openai(*, system_prompt: str, user_prompt: str, model: 
     raise RuntimeError("OpenAI request failed without explicit error")
 
 
-def generate_creative_dossier(questionnaire: dict[str, Any]) -> dict[str, Any]:
-    dossier = request_program_from_openai(
-        system_prompt=build_dossier_system_prompt(),
-        user_prompt=build_dossier_user_prompt(questionnaire),
-        model=OPENAI_DOSSIER_MODEL,
-        reasoning_effort=OPENAI_DOSSIER_REASONING,
-    )
-    return annotate_dossier(as_dict(dossier))
+def generate_creative_dossier(
+    questionnaire: dict[str, Any],
+    progress_callback: Any | None = None,
+) -> dict[str, Any]:
+    dossier: dict[str, Any] = {}
+    for chunk_name, percent, status_message, chunk_instruction in DOSSIER_CHUNK_SPECS:
+        if progress_callback is not None:
+            progress_callback(percent, status_message, dossier)
+        chunk = request_program_from_openai(
+            system_prompt=build_dossier_system_prompt(),
+            user_prompt=build_dossier_chunk_user_prompt(questionnaire, dossier, chunk_name, chunk_instruction),
+            model=OPENAI_DOSSIER_MODEL,
+            reasoning_effort=OPENAI_DOSSIER_REASONING,
+        )
+        dossier.update(as_dict(chunk))
+    return annotate_dossier(dossier)
 
 
 def write_program_from_dossier(
@@ -1879,7 +1942,7 @@ def write_program_from_dossier(
     program: dict[str, Any] = {}
     for chunk_name, percent, status_message, chunk_instruction in WRITER_CHUNK_SPECS:
         if progress_callback is not None:
-            progress_callback(percent, status_message)
+            progress_callback(percent, status_message, program)
         chunk = request_program_from_openai(
             system_prompt=build_stage_system_prompt(),
             user_prompt=build_writer_chunk_user_prompt(questionnaire, dossier, program, chunk_name, chunk_instruction),
@@ -1887,16 +1950,30 @@ def write_program_from_dossier(
             reasoning_effort=OPENAI_WRITER_REASONING,
         )
         program = merge_program_chunk(program, as_dict(chunk))
+        if progress_callback is not None:
+            progress_callback(percent, status_message, program)
     return normalize_program(program, questionnaire)
 
 
-def polish_program(questionnaire: dict[str, Any], dossier: dict[str, Any], program: dict[str, Any]) -> dict[str, Any]:
-    polished = request_program_from_openai(
-        system_prompt=build_polish_system_prompt(),
-        user_prompt=build_polish_user_prompt(questionnaire, dossier, program),
-        model=OPENAI_POLISH_MODEL,
-        reasoning_effort=OPENAI_POLISH_REASONING,
-    )
+def polish_program(
+    questionnaire: dict[str, Any],
+    dossier: dict[str, Any],
+    program: dict[str, Any],
+    progress_callback: Any | None = None,
+) -> dict[str, Any]:
+    polished = dict(program)
+    for chunk_name, percent, status_message, chunk_instruction in POLISH_CHUNK_SPECS:
+        if progress_callback is not None:
+            progress_callback(percent, status_message, polished)
+        chunk = request_program_from_openai(
+            system_prompt=build_polish_system_prompt(),
+            user_prompt=build_polish_chunk_user_prompt(questionnaire, dossier, polished, chunk_name, chunk_instruction),
+            model=OPENAI_POLISH_MODEL,
+            reasoning_effort=OPENAI_POLISH_REASONING,
+        )
+        polished = merge_program_chunk(polished, as_dict(chunk))
+        if progress_callback is not None:
+            progress_callback(percent, status_message, polished)
     return normalize_program(polished, questionnaire)
 
 
@@ -2327,7 +2404,18 @@ def run_generation_job(submission_id: str, job_id: str) -> None:
             expected_job_id=job_id,
         )
         with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(generate_creative_dossier, questionnaire)
+            future = executor.submit(
+                generate_creative_dossier,
+                questionnaire,
+                lambda percent, message, _: save_generation_state(
+                    submission_id,
+                    status="running",
+                    stage="dossier",
+                    percent=percent,
+                    message=message,
+                    expected_job_id=job_id,
+                ),
+            )
             try:
                 dossier = future.result(timeout=GENERATION_WATCHDOG_SECONDS)
             except FutureTimeoutError:
@@ -2356,12 +2444,13 @@ def run_generation_job(submission_id: str, job_id: str) -> None:
                 write_program_from_dossier,
                 questionnaire,
                 dossier,
-                lambda percent, message: save_generation_state(
+                lambda percent, message, partial_program: save_generation_state(
                     submission_id,
                     status="running",
                     stage="writer",
                     percent=percent,
                     message=message,
+                    program=finalize_generated_program(partial_program, questionnaire, dossier) if partial_program else None,
                     expected_job_id=job_id,
                 ),
             )
@@ -2389,7 +2478,21 @@ def run_generation_job(submission_id: str, job_id: str) -> None:
             expected_job_id=job_id,
         )
         with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(polish_program, questionnaire, dossier, draft_program)
+            future = executor.submit(
+                polish_program,
+                questionnaire,
+                dossier,
+                draft_program,
+                lambda percent, message, partial_program: save_generation_state(
+                    submission_id,
+                    status="running",
+                    stage="polish",
+                    percent=percent,
+                    message=message,
+                    program=finalize_generated_program(partial_program, questionnaire, dossier),
+                    expected_job_id=job_id,
+                ),
+            )
             try:
                 program = future.result(timeout=GENERATION_WATCHDOG_SECONDS)
             except FutureTimeoutError:
@@ -2579,21 +2682,43 @@ def generate_program(submission_id: str) -> dict[str, Any]:
 
     try:
         save_generation_state(submission_id, status="running", stage="dossier", percent=10, message="Собираем creative dossier")
-        dossier = generate_creative_dossier(submission["questionnaire"])
+        dossier = generate_creative_dossier(
+            submission["questionnaire"],
+            lambda percent, message, _: save_generation_state(
+                submission_id,
+                status="running",
+                stage="dossier",
+                percent=percent,
+                message=message,
+            ),
+        )
         save_generation_state(submission_id, status="running", stage="writer", percent=40, message="Пишем основной сценарий")
         draft_program = write_program_from_dossier(
             submission["questionnaire"],
             dossier,
-            lambda percent, message: save_generation_state(
+            lambda percent, message, partial_program: save_generation_state(
                 submission_id,
                 status="running",
                 stage="writer",
                 percent=percent,
                 message=message,
+                program=finalize_generated_program(partial_program, submission["questionnaire"], dossier) if partial_program else None,
             ),
         )
         save_generation_state(submission_id, status="running", stage="polish", percent=78, message="Шлифуем тексты и DJ sheet")
-        program = polish_program(submission["questionnaire"], dossier, draft_program)
+        program = polish_program(
+            submission["questionnaire"],
+            dossier,
+            draft_program,
+            lambda percent, message, partial_program: save_generation_state(
+                submission_id,
+                status="running",
+                stage="polish",
+                percent=percent,
+                message=message,
+                program=finalize_generated_program(partial_program, submission["questionnaire"], dossier),
+            ),
+        )
         program = finalize_generated_program(program, submission["questionnaire"], dossier)
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Ошибка генерации программы: {error}") from error
