@@ -3,11 +3,11 @@ import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
   const { password } = (await request.json()) as { password?: string };
-  const expectedPassword = process.env.HOST_PANEL_PASSWORD;
-
-  if (!expectedPassword) {
-    return NextResponse.json({ message: "HOST_PANEL_PASSWORD is not configured" }, { status: 500 });
-  }
+  const expectedPassword =
+    process.env.HOST_PANEL_PASSWORD ||
+    process.env.ADMIN_PASSWORD ||
+    process.env.HOST_PASSWORD ||
+    "change-me";
 
   if (!password || password !== expectedPassword) {
     return NextResponse.json({ message: "Неверный пароль" }, { status: 401 });

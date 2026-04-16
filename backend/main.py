@@ -14,7 +14,7 @@ from uuid import uuid4
 
 from docx import Document
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
@@ -45,8 +45,6 @@ OPENAI_POLISH_REASONING = os.getenv("OPENAI_POLISH_REASONING", OPENAI_TIMEOUT_RE
 OPENAI_GATEWAY_RETRIES = int(os.getenv("OPENAI_GATEWAY_RETRIES", "3"))
 OPENAI_GATEWAY_RETRY_DELAY_SECONDS = float(os.getenv("OPENAI_GATEWAY_RETRY_DELAY_SECONDS", "2.5"))
 GENERATION_WATCHDOG_SECONDS = float(os.getenv("GENERATION_WATCHDOG_SECONDS", "420"))
-MAX_ACTIVE_GENERATIONS = int(os.getenv("MAX_ACTIVE_GENERATIONS", "2"))
-GENERATION_IP_THROTTLE_SECONDS = float(os.getenv("GENERATION_IP_THROTTLE_SECONDS", "3"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 FRONTEND_ORIGINS = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000")
 RAILWAY_VOLUME_MOUNT_PATH = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
@@ -60,8 +58,6 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 SUBMISSIONS_FILE = DATA_DIR / "submissions.json"
 GENERATION_THREAD_LOCK = Lock()
 GENERATION_THREADS: dict[str, Thread] = {}
-GENERATION_RATE_LIMIT_LOCK = Lock()
-GENERATION_IP_ACTIVITY: dict[str, float] = {}
 
 client = OpenAI(api_key=OPENAI_API_KEY, timeout=OPENAI_TIMEOUT_SECONDS, max_retries=1) if OpenAI and OPENAI_API_KEY else None
 
@@ -2257,35 +2253,6 @@ def save_generation_state(
         return
 
 
-def get_client_ip(request: Request) -> str:
-    forwarded_for = request.headers.get("x-forwarded-for", "").strip()
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
-
-
-def ensure_generation_request_allowed(request: Request) -> None:
-    client_ip = get_client_ip(request)
-    now_ts = datetime.now().timestamp()
-    with GENERATION_RATE_LIMIT_LOCK:
-        last_ts = GENERATION_IP_ACTIVITY.get(client_ip, 0.0)
-        if now_ts - last_ts < GENERATION_IP_THROTTLE_SECONDS:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Слишком частые запросы на генерацию с этого IP. Подождите {int(GENERATION_IP_THROTTLE_SECONDS)} сек.",
-            )
-        GENERATION_IP_ACTIVITY[client_ip] = now_ts
-    with GENERATION_THREAD_LOCK:
-        active_threads = sum(1 for worker in GENERATION_THREADS.values() if worker.is_alive())
-    if active_threads >= MAX_ACTIVE_GENERATIONS:
-        raise HTTPException(
-            status_code=429,
-            detail="Сейчас уже выполняется слишком много генераций. Попробуйте снова через минуту.",
-        )
-
-
 def run_generation_job(submission_id: str, job_id: str) -> None:
     try:
         submissions, index = get_submission_or_404(submission_id)
@@ -2525,7 +2492,7 @@ def get_generation_status(submission_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/submissions/{submission_id}/generate-program/start")
-def start_generate_program(submission_id: str, request: Request) -> dict[str, Any]:
+def start_generate_program(submission_id: str) -> dict[str, Any]:
     submissions, index = get_submission_or_404(submission_id)
     submission = submissions[index]
     if is_program_actual(submission.get("program")):
@@ -2540,7 +2507,6 @@ def start_generate_program(submission_id: str, request: Request) -> dict[str, An
         }
 
     save_generation_state(submission_id, status="queued", stage="queued", percent=3, message="Ставим генерацию в работу")
-    ensure_generation_request_allowed(request)
     start_generation_job(submission_id)
     submissions, index = get_submission_or_404(submission_id)
     return {
@@ -2552,7 +2518,7 @@ def start_generate_program(submission_id: str, request: Request) -> dict[str, An
 
 
 @app.post("/api/submissions/{submission_id}/generate-program")
-def generate_program(submission_id: str, request: Request) -> dict[str, Any]:
+def generate_program(submission_id: str) -> dict[str, Any]:
     submissions, index = get_submission_or_404(submission_id)
     submission = submissions[index]
     if is_program_actual(submission.get("program")):
