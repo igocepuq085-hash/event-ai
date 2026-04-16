@@ -135,7 +135,6 @@ class QuestionnaireSubmission(BaseModel):
 def load_submissions() -> list[dict[str, Any]]:
     if not SUBMISSIONS_FILE.exists():
         return []
-    ensure_generation_request_allowed(request)
     try:
         data = json.loads(SUBMISSIONS_FILE.read_text(encoding="utf-8"))
         return data if isinstance(data, list) else []
