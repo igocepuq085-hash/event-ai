@@ -1153,6 +1153,49 @@ def build_guest_management_from_questionnaire(questionnaire: dict[str, Any]) -> 
     }
 
 
+def infer_timeline_duration(title: str, index: int, total: int) -> int:
+    normalized_title = title.lower()
+    keyword_durations = [
+        (("сбор", "welcome", "гостей"), 20),
+        (("открыт", "opening"), 15),
+        (("истори", "смыслов", "ядро"), 20),
+        (("семейн", "эмоцион"), 25),
+        (("вовлеч", "интерактив"), 20),
+        (("сюрпр", "акцент"), 20),
+        (("танц", "dance"), 35),
+        (("финал", "закрыт", "closing"), 15),
+    ]
+    for markers, duration in keyword_durations:
+        if any(marker in normalized_title for marker in markers):
+            return duration
+    if index == 0:
+        return 20
+    if index == total - 1:
+        return 15
+    if index in {1, 2}:
+        return 20
+    return 25 if total >= 6 and index == total // 2 else 20
+
+
+def normalize_timeline_schedule(timeline: list[dict[str, Any]], start_time: str) -> list[dict[str, Any]]:
+    if not timeline:
+        return timeline
+    normalized: list[dict[str, Any]] = []
+    elapsed = 0
+    total = len(timeline)
+    anchor = (start_time or "").strip() or "18:00"
+    for index, block in enumerate(timeline):
+        block_data = as_dict(block)
+        duration = infer_timeline_duration(str(block_data.get("block_title", "")), index, total)
+        time_from = add_minutes(anchor, elapsed)
+        elapsed += duration
+        time_to = add_minutes(anchor, elapsed)
+        block_data["time_from"] = time_from
+        block_data["time_to"] = time_to
+        normalized.append(block_data)
+    return normalized
+
+
 def refine_program_payload(program: dict[str, Any], questionnaire: dict[str, Any]) -> dict[str, Any]:
     preferred_tracks = extract_music_preferences(questionnaire)
     program["event_passport"] = build_event_passport_from_questionnaire(questionnaire, as_dict(program.get("event_passport")))
@@ -1188,7 +1231,10 @@ def refine_program_payload(program: dict[str, Any], questionnaire: dict[str, Any
             seen_titles.add(title.lower())
             filtered.append(block_data)
         if filtered:
-            program["scenario_timeline"] = filtered
+            start_time = clean_fragment(questionnaire.get("startTime", "")) or clean_fragment(
+                as_dict(program.get("event_passport")).get("timing_anchor", "")
+            ) or "18:00"
+            program["scenario_timeline"] = normalize_timeline_schedule(filtered, start_time)
 
     dj = as_dict(program.get("dj_guidance"))
     if preferred_tracks:
