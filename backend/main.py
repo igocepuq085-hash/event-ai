@@ -317,6 +317,114 @@ DJ_ARTIST_NEIGHBORS = {
 }
 
 
+DJ_TRACK_REFERENCES = {
+    "ленинград": [
+        "Ленинград — Экспонат",
+        "Ленинград — WWW",
+        "Ленинград — В Питере пить",
+        "Ленинград — i_$uss",
+    ],
+    "ногу свело": [
+        "Ногу Свело! — Наши юные смешные голоса",
+        "Ногу Свело! — Идем на Восток!",
+        "Ногу Свело! — Хару Мамбуру",
+        "Ногу Свело! — Лилипутская любовь",
+    ],
+    "руки вверх": [
+        "Руки Вверх! — 18 мне уже",
+        "Руки Вверх! — Крошка моя",
+        "Руки Вверх! — Он тебя целует",
+        "Руки Вверх! — Ай-яй-яй",
+    ],
+    "кино": [
+        "Кино — Группа крови",
+        "Кино — Пачка сигарет",
+        "Кино — Звезда по имени Солнце",
+        "Кино — Когда твоя девушка больна",
+    ],
+    "браво": [
+        "Браво — Этот город",
+        "Браво — Любите, девушки",
+        "Браво — Московский бит",
+    ],
+    "звери": [
+        "Звери — Районы-кварталы",
+        "Звери — До скорой встречи",
+        "Звери — Просто такая сильная любовь",
+    ],
+    "мумий тролль": [
+        "Мумий Тролль — Владивосток 2000",
+        "Мумий Тролль — Невеста?",
+        "Мумий Тролль — Медведица",
+    ],
+    "сплин": [
+        "Сплин — Выхода нет",
+        "Сплин — Орбит без сахара",
+        "Сплин — Мое сердце",
+    ],
+    "uma2rman": [
+        "Uma2rman — Проститься",
+        "Uma2rman — Прасковья",
+        "Uma2rman — В городе N",
+    ],
+    "градусы": [
+        "Градусы — Режиссер",
+        "Градусы — Голая",
+        "Градусы — Хочется",
+    ],
+    "марун 5": [
+        "Maroon 5 — Sugar",
+        "Maroon 5 — Moves Like Jagger",
+        "Maroon 5 — This Love",
+    ],
+    "the killers": [
+        "The Killers — Mr. Brightside",
+        "The Killers — Human",
+        "The Killers — Somebody Told Me",
+    ],
+    "blur": [
+        "Blur — Song 2",
+        "Blur — Girls & Boys",
+    ],
+    "franz ferdinand": [
+        "Franz Ferdinand — Take Me Out",
+        "Franz Ferdinand — Do You Want To",
+    ],
+    "backstreet boys": [
+        "Backstreet Boys — Everybody",
+        "Backstreet Boys — I Want It That Way",
+    ],
+    "nsync": [
+        "NSYNC — Bye Bye Bye",
+        "NSYNC — It's Gonna Be Me",
+    ],
+    "ace of base": [
+        "Ace of Base — All That She Wants",
+        "Ace of Base — The Sign",
+    ],
+    "dua lipa": [
+        "Dua Lipa — Levitating",
+        "Dua Lipa — Don't Start Now",
+    ],
+    "bruno mars": [
+        "Bruno Mars — Treasure",
+        "Bruno Mars — 24K Magic",
+    ],
+    "jamiroquai": [
+        "Jamiroquai — Little L",
+        "Jamiroquai — Canned Heat",
+    ],
+    "purple disco machine": [
+        "Purple Disco Machine — Hypnotized",
+        "Purple Disco Machine — Fireworks",
+    ],
+    "parcels": [
+        "Parcels — Overnight",
+        "Parcels — Tieduprightnow",
+    ],
+}
+
+
 def parse_track_like_lines(value: Any) -> list[str]:
     if isinstance(value, list):
         return clean_text_list(value, limit=12)
@@ -335,6 +443,55 @@ def infer_related_artists(preferences: list[str]) -> tuple[list[str], list[str]]
             related.extend(local_items)
             international.extend(global_items)
     return clean_text_list(related, limit=8), clean_text_list(international, limit=6)
+
+
+def build_dj_track_reference_list(questionnaire: dict[str, Any], dj: dict[str, Any]) -> list[str]:
+    preferences = extract_music_preferences(questionnaire)
+    collected: list[str] = []
+    collected.extend(clean_text_list(as_list(dj.get("special_tracks")), limit=12))
+
+    for field in [
+        "welcome_music",
+        "opening_music",
+        "emotional_blocks_music",
+        "dance_block_1",
+        "dance_block_2",
+        "dance_block_3",
+        "final_block_music",
+        "final_music",
+    ]:
+        collected.extend(parse_track_like_lines(dj.get(field, "")))
+
+    for section_name in ["welcome", "opening", "emotion", "dance_1", "dance_2", "dance_3", "final"]:
+        section = as_dict(as_dict(dj.get("sections")).get(section_name))
+        collected.extend(clean_text_list(as_list(section.get("track_refs")), limit=10))
+
+    lowered_preferences = " ".join(preferences).lower()
+    for key, tracks in DJ_TRACK_REFERENCES.items():
+        if key in lowered_preferences:
+            collected.extend(tracks)
+
+    if len(clean_text_list(collected)) < 20:
+        for key, tracks in DJ_TRACK_REFERENCES.items():
+            if any(neighbor in lowered_preferences for neighbor in key.split()):
+                collected.extend(tracks)
+
+    fallback_tracks = [
+        "Parcels — Tieduprightnow",
+        "Parcels — Overnight",
+        "Purple Disco Machine — Hypnotized",
+        "Purple Disco Machine — Fireworks",
+        "Dua Lipa — Levitating",
+        "Dua Lipa — Don't Start Now",
+        "Bruno Mars — Treasure",
+        "Bruno Mars — 24K Magic",
+        "Jamiroquai — Little L",
+        "Jamiroquai — Canned Heat",
+        "Maroon 5 — Sugar",
+        "The Killers — Mr. Brightside",
+    ]
+    collected.extend(fallback_tracks)
+    return clean_text_list(collected, limit=24)
 
 
 def build_dj_sections(questionnaire: dict[str, Any], dj: dict[str, Any]) -> dict[str, Any]:
@@ -2564,56 +2721,7 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
     dj = as_dict(program.get("dj_guidance"))
     if has_useful_value(dj):
         document.add_heading("6. DJ sheet", level=1)
-        add_label_value_if_useful(document, "Общая музыкальная логика", dj.get("overall_music_policy", ""))
-        sacred_tracks = clean_text_list(as_list(dj.get("special_tracks")))
-        add_list_if_useful(document, "Sacred tracks:", sacred_tracks)
-        seen_tracks = {item.lower() for item in sacred_tracks}
-        seen_related: set[str] = set()
-        seen_global: set[str] = set()
-        for section_name, section_title in [
-            ("welcome", "Welcome"),
-            ("opening", "Opening"),
-            ("emotion", "Emotion"),
-            ("dance_1", "Dance 1"),
-            ("dance_2", "Dance 2"),
-            ("dance_3", "Dance 3"),
-            ("final", "Final"),
-        ]:
-            section = as_dict(as_dict(dj.get("sections")).get(section_name))
-            if not has_useful_value(section):
-                continue
-            section_tracks = [
-                item
-                for item in clean_text_list(as_list(section.get("track_refs")), limit=8)
-                if item.lower() not in seen_tracks
-            ]
-            for item in section_tracks:
-                seen_tracks.add(item.lower())
-            section_related = [
-                item
-                for item in clean_text_list(as_list(section.get("related_artists")), limit=8)
-                if item.lower() not in seen_related and item.lower() not in seen_tracks
-            ]
-            for item in section_related:
-                seen_related.add(item.lower())
-            section_global = [
-                item
-                for item in clean_text_list(as_list(section.get("international_analogs")), limit=6)
-                if item.lower() not in seen_global and item.lower() not in seen_tracks
-            ]
-            for item in section_global:
-                seen_global.add(item.lower())
-            document.add_paragraph(section_title)
-            add_label_value_if_useful(document, "Цель блока", section.get("goal"))
-            add_label_value_if_useful(document, "Музыкальный характер", section.get("music_character"))
-            add_label_value_if_useful(document, "Темп / ритмическая логика", section.get("tempo_logic"))
-            add_list_if_useful(document, "Треки-ориентиры:", section_tracks)
-            add_list_if_useful(document, "Похожие артисты:", section_related)
-            add_list_if_useful(document, "Международные аналоги:", section_global)
-            add_list_if_useful(document, "Чего избегать:", as_list(section.get("avoid")))
-            add_label_value_if_useful(document, "Переход", section.get("transition"))
-        add_list_if_useful(document, "Stop list:", as_list(dj.get("stop_list")))
-        add_list_if_useful(document, "Технические заметки:", as_list(dj.get("technical_notes")))
+        add_list_if_useful(document, "Треки-ориентиры:", build_dj_track_reference_list(questionnaire, dj))
 
     guest_management = as_dict(program.get("guest_management"))
     if has_useful_value(guest_management):
