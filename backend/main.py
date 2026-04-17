@@ -317,6 +317,15 @@ DJ_ARTIST_NEIGHBORS = {
 }
 
 
+def parse_track_like_lines(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return clean_text_list(value, limit=12)
+    text = clean_fragment(str(value or ""))
+    if not text:
+        return []
+    return clean_text_list(re.split(r"[\n,;]+", text), limit=12)
+
+
 def infer_related_artists(preferences: list[str]) -> tuple[list[str], list[str]]:
     related: list[str] = []
     international: list[str] = []
@@ -325,10 +334,6 @@ def infer_related_artists(preferences: list[str]) -> tuple[list[str], list[str]]
         if key in lowered:
             related.extend(local_items)
             international.extend(global_items)
-    if not related:
-        related = ["Cream Soda", "Моя Мишель", "Therr Maitz", "Zivert", "Браво"]
-    if not international:
-        international = ["Dua Lipa", "Bruno Mars", "Jamiroquai", "Parcels", "Purple Disco Machine"]
     return clean_text_list(related, limit=8), clean_text_list(international, limit=6)
 
 
@@ -350,27 +355,43 @@ def build_dj_sections(questionnaire: dict[str, Any], dj: dict[str, Any]) -> dict
         "dance_3": ("Дать поздний пик без потери вкуса", "праздничный, уверенный, широкий", "пик по плотности и отдаче"),
         "final": ("Закрыть вечер объединяющим ощущением", "светлый, объединяющий, титровый", "снять пик и оставить послевкусие"),
     }
+    legacy_field_map = {
+        "welcome": "welcome_music",
+        "opening": "opening_music",
+        "emotion": "emotional_blocks_music",
+        "dance_1": "dance_block_1",
+        "dance_2": "dance_block_2",
+        "dance_3": "dance_block_3",
+        "final": "final_music",
+    }
     existing_sections = as_dict(dj.get("sections"))
     sections: dict[str, Any] = {}
     for name, (goal, character, tempo) in section_defaults.items():
         base = as_dict(existing_sections.get(name))
+        legacy_tracks = parse_track_like_lines(dj.get(legacy_field_map[name], ""))
         tracks = clean_text_list(
             as_list(base.get("track_refs"))
             + list_from_text(str(base.get("track_refs_text", "")), [])
-            + anchors,
+            + legacy_tracks
+            + (anchors[:3] if name in {"welcome", "opening", "emotion"} else anchors[:5]),
             limit=8,
         )
+        base_related = clean_text_list(as_list(base.get("related_artists")), limit=8)
+        base_global = clean_text_list(as_list(base.get("international_analogs")), limit=6)
+        if not tracks and not has_useful_value(base) and not legacy_tracks:
+            continue
         sections[name] = {
             "goal": clean_fragment(base.get("goal", ""), goal),
             "music_character": clean_fragment(base.get("music_character", ""), character),
             "tempo_logic": clean_fragment(base.get("tempo_logic", ""), tempo),
             "track_refs": tracks,
-            "related_artists": clean_text_list(as_list(base.get("related_artists")) + related_artists, limit=8),
-            "international_analogs": clean_text_list(as_list(base.get("international_analogs")) + international, limit=6),
+            "related_artists": base_related or (related_artists[:5] if preferences else []),
+            "international_analogs": base_global or (international[:4] if preferences else []),
             "avoid": clean_text_list(as_list(base.get("avoid")) + bans, limit=8),
             "transition": clean_fragment(base.get("transition", ""), "Переход делай по энергии и смыслу, без резкого жанрового обрыва."),
         }
-    dj["sections"] = sections
+    if sections:
+        dj["sections"] = sections
     dj["special_tracks"] = anchors
     dj["stop_list"] = bans
     return dj
@@ -996,7 +1017,7 @@ def refine_program_payload(program: dict[str, Any], questionnaire: dict[str, Any
             block_data["block_title"] = title
             block_data["host_text"] = dedupe_sentences(str(block_data.get("host_text", "")))
             if not any(marker in title.lower() for marker in CORE_TIMELINE_MARKERS):
-                block_data["host_text"] = shorten_secondary_text(block_data["host_text"], max_sentences=3)
+                block_data["host_text"] = shorten_secondary_text(block_data["host_text"], max_sentences=5)
             block_data["block_purpose"] = dedupe_sentences(str(block_data.get("block_purpose", "")))
             block_data["what_happens"] = dedupe_sentences(str(block_data.get("what_happens", "")))
             block_data["host_action"] = dedupe_sentences(str(block_data.get("host_action", "")))
