@@ -62,8 +62,8 @@ export default function HostDetailPage() {
       .then(([data, statusData]) => {
         setSubmission(data.item);
         setGeneration(statusData.generation || data.item.generation || { status: "idle" });
-        setHasProgram(Boolean(statusData.hasProgram || data.item.program));
-        if (data.item.program) {
+        setHasProgram(Boolean(statusData.hasProgram));
+        if (statusData.hasProgram && data.item.program) {
           setProgram(data.item.program);
         }
       })
@@ -85,12 +85,14 @@ export default function HostDetailPage() {
         if (statusData.hasProgram || statusData.generation.status === "ready") {
           const data = await fetchApi<{ item: Submission }>(`/api/submissions/${id}`);
           setSubmission(data.item);
-          setGeneration(data.item.generation || { status: "ready" });
-          setHasProgram(Boolean(statusData.hasProgram || data.item.program));
-          if (data.item.program) {
+          setGeneration(statusData.generation.status === "ready" ? (data.item.generation || { status: "ready" }) : statusData.generation);
+          setHasProgram(Boolean(statusData.hasProgram));
+          if (statusData.hasProgram && data.item.program) {
             setProgram(data.item.program);
           }
-          window.clearInterval(intervalId);
+          if (statusData.hasProgram || statusData.generation.status === "ready") {
+            window.clearInterval(intervalId);
+          }
         }
       } catch (pollError) {
         pollErrorsRef.current += 1;
@@ -111,8 +113,9 @@ export default function HostDetailPage() {
     fetchApi<{ item: Submission }>(`/api/submissions/${id}`)
       .then((data) => {
         setSubmission(data.item);
-        setHasProgram(Boolean(data.item.program));
-        if (data.item.program) {
+        const readyAndActual = Boolean(data.item.generation?.status === "ready" && data.item.program);
+        setHasProgram(readyAndActual);
+        if (readyAndActual && data.item.program) {
           setProgram(data.item.program);
         }
       })

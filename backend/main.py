@@ -2732,7 +2732,7 @@ def run_generation_job(submission_id: str, job_id: str) -> None:
                     stage="writer",
                     percent=percent,
                     message=message,
-                    program=finalize_generated_program(partial_program, questionnaire, dossier) if partial_program else None,
+                    program=post_process_program(partial_program, questionnaire) if partial_program else None,
                     expected_job_id=job_id,
                 ),
             )
@@ -2771,7 +2771,7 @@ def run_generation_job(submission_id: str, job_id: str) -> None:
                     stage="polish",
                     percent=percent,
                     message=message,
-                    program=finalize_generated_program(partial_program, questionnaire, dossier),
+                    program=post_process_program(partial_program, questionnaire),
                     expected_job_id=job_id,
                 ),
             )
