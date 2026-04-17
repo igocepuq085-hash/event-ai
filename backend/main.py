@@ -1196,9 +1196,52 @@ def normalize_timeline_schedule(timeline: list[dict[str, Any]], start_time: str)
     return normalized
 
 
+def pick_direct_host_text(
+    title: str,
+    index: int,
+    total: int,
+    direct_host_texts: dict[str, str],
+) -> str:
+    normalized_title = title.lower()
+    keyword_map = [
+        (("сбор", "welcome", "гостей"), "Сбор гостей и тонкий welcome"),
+        (("открыт", "opening"), "Главное открытие вечера"),
+        (("истори", "смыслов", "ядро"), "Первое смысловое ядро"),
+        (("семейн", "эмоцион"), "Семейный и эмоциональный блок"),
+        (("сюрпр", "акцент"), "Сюрприз или специальный акцент"),
+        (("танц", "dance"), "Танцевальная волна"),
+        (("финал", "закрыт", "closing"), "Финал и закрытие вечера"),
+    ]
+    for markers, key in keyword_map:
+        if any(marker in normalized_title for marker in markers):
+            return str(direct_host_texts.get(key, ""))
+    if index == 0:
+        return str(direct_host_texts.get("Сбор гостей и тонкий welcome", ""))
+    if index == 1:
+        return str(direct_host_texts.get("Главное открытие вечера", ""))
+    if index == total - 1:
+        return str(direct_host_texts.get("Финал и закрытие вечера", ""))
+    middle_keys = [
+        "Первое смысловое ядро",
+        "Семейный и эмоциональный блок",
+        "Сюрприз или специальный акцент",
+        "Танцевальная волна",
+    ]
+    if middle_keys:
+        return str(direct_host_texts.get(middle_keys[min(max(index - 2, 0), len(middle_keys) - 1)], ""))
+    return ""
+
+
 def refine_program_payload(program: dict[str, Any], questionnaire: dict[str, Any]) -> dict[str, Any]:
     preferred_tracks = extract_music_preferences(questionnaire)
     program["event_passport"] = build_event_passport_from_questionnaire(questionnaire, as_dict(program.get("event_passport")))
+    heroes = (
+        f"{questionnaire.get('groomName', '').strip()} и {questionnaire.get('brideName', '').strip()}".strip()
+        if questionnaire.get("eventType") == "wedding"
+        else questionnaire.get("celebrantName", "").strip()
+    ) or questionnaire.get("clientName", "").strip() or "герои вечера"
+    atmosphere = questionnaire.get("atmosphere") or questionnaire.get("anniversaryAtmosphere") or "теплая, живая, современная"
+    direct_host_texts = build_direct_host_texts(questionnaire, heroes, atmosphere)
     timeline = as_list(program.get("scenario_timeline"))
     if timeline:
         filtered = []
@@ -1216,6 +1259,10 @@ def refine_program_payload(program: dict[str, Any], questionnaire: dict[str, Any
                 continue
             block_data["block_title"] = title
             block_data["host_text"] = dedupe_sentences(str(block_data.get("host_text", "")))
+            if len(block_data["host_text"].strip()) < 500:
+                fallback_host_text = pick_direct_host_text(title, index, len(timeline), direct_host_texts)
+                if fallback_host_text:
+                    block_data["host_text"] = fallback_host_text
             if not any(marker in title.lower() for marker in CORE_TIMELINE_MARKERS):
                 block_data["host_text"] = shorten_secondary_text(block_data["host_text"], max_sentences=5)
             block_data["block_purpose"] = dedupe_sentences(str(block_data.get("block_purpose", "")))
