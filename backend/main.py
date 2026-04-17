@@ -2826,6 +2826,17 @@ def start_generation_job(submission_id: str) -> None:
         worker.start()
 
 
+def reset_program_generation(submission_id: str) -> None:
+    submissions = load_submissions()
+    for index, submission in enumerate(submissions):
+        if submission["id"] != submission_id:
+            continue
+        submissions[index]["program"] = {}
+        submissions[index]["generation"] = default_generation_state()
+        save_submissions(submissions)
+        return
+
+
 def get_submission_or_404(submission_id: str) -> tuple[list[dict[str, Any]], int]:
     submissions = load_submissions()
     for index, submission in enumerate(submissions):
@@ -2925,9 +2936,13 @@ def get_generation_status(submission_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/submissions/{submission_id}/generate-program/start")
-def start_generate_program(submission_id: str) -> dict[str, Any]:
+def start_generate_program(submission_id: str, force: bool = False) -> dict[str, Any]:
     submissions, index = get_submission_or_404(submission_id)
     submission = submissions[index]
+    if force:
+        reset_program_generation(submission_id)
+        submissions, index = get_submission_or_404(submission_id)
+        submission = submissions[index]
     if is_program_actual(submission.get("program")):
         save_generation_state(submission_id, status="ready", stage="final_assembly", percent=100, message="Программа уже готова")
         submissions, index = get_submission_or_404(submission_id)

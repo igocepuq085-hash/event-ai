@@ -125,9 +125,15 @@ export default function HostDetailPage() {
   const handleGenerate = () => {
     if (!id) return;
     setError("");
+    const shouldForceRegenerate = Boolean(hasProgram || generation.status === "failed" || generation.status === "ready");
     startTransition(async () => {
       try {
-        const data = await fetchApi<GenerationResponse>(`/api/submissions/${id}/generate-program/start`, { method: "POST" });
+        setProgram(null);
+        setHasProgram(false);
+        const data = await fetchApi<GenerationResponse>(
+          `/api/submissions/${id}/generate-program/start${shouldForceRegenerate ? "?force=true" : ""}`,
+          { method: "POST" },
+        );
         setGeneration(data.generation);
         setHasProgram(Boolean(data.hasProgram));
         if (data.program) {
@@ -188,6 +194,7 @@ export default function HostDetailPage() {
 
   const isGenerating = isPending || ["queued", "running"].includes(generation.status);
   const canDownload = generation.status === "ready" && hasProgram && Boolean(program);
+  const shouldForceRegenerate = Boolean(hasProgram || generation.status === "failed" || generation.status === "ready");
   const passport = (program?.event_passport as Record<string, unknown> | undefined) || null;
   const timeline = (program?.scenario_timeline as Record<string, unknown>[] | undefined) || [];
   const hostCommands = (program?.key_host_commands as string[] | undefined) || [];
