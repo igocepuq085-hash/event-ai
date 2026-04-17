@@ -2565,7 +2565,11 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
     if has_useful_value(dj):
         document.add_heading("6. DJ sheet", level=1)
         add_label_value_if_useful(document, "Общая музыкальная логика", dj.get("overall_music_policy", ""))
-        add_list_if_useful(document, "Sacred tracks:", as_list(dj.get("special_tracks")))
+        sacred_tracks = clean_text_list(as_list(dj.get("special_tracks")))
+        add_list_if_useful(document, "Sacred tracks:", sacred_tracks)
+        seen_tracks = {item.lower() for item in sacred_tracks}
+        seen_related: set[str] = set()
+        seen_global: set[str] = set()
         for section_name, section_title in [
             ("welcome", "Welcome"),
             ("opening", "Opening"),
@@ -2578,13 +2582,34 @@ def build_docx(submission: dict[str, Any], program: dict[str, Any]) -> BytesIO:
             section = as_dict(as_dict(dj.get("sections")).get(section_name))
             if not has_useful_value(section):
                 continue
+            section_tracks = [
+                item
+                for item in clean_text_list(as_list(section.get("track_refs")), limit=8)
+                if item.lower() not in seen_tracks
+            ]
+            for item in section_tracks:
+                seen_tracks.add(item.lower())
+            section_related = [
+                item
+                for item in clean_text_list(as_list(section.get("related_artists")), limit=8)
+                if item.lower() not in seen_related and item.lower() not in seen_tracks
+            ]
+            for item in section_related:
+                seen_related.add(item.lower())
+            section_global = [
+                item
+                for item in clean_text_list(as_list(section.get("international_analogs")), limit=6)
+                if item.lower() not in seen_global and item.lower() not in seen_tracks
+            ]
+            for item in section_global:
+                seen_global.add(item.lower())
             document.add_paragraph(section_title)
             add_label_value_if_useful(document, "Цель блока", section.get("goal"))
             add_label_value_if_useful(document, "Музыкальный характер", section.get("music_character"))
             add_label_value_if_useful(document, "Темп / ритмическая логика", section.get("tempo_logic"))
-            add_list_if_useful(document, "Треки-ориентиры:", as_list(section.get("track_refs")))
-            add_list_if_useful(document, "Похожие артисты:", as_list(section.get("related_artists")))
-            add_list_if_useful(document, "Международные аналоги:", as_list(section.get("international_analogs")))
+            add_list_if_useful(document, "Треки-ориентиры:", section_tracks)
+            add_list_if_useful(document, "Похожие артисты:", section_related)
+            add_list_if_useful(document, "Международные аналоги:", section_global)
             add_list_if_useful(document, "Чего избегать:", as_list(section.get("avoid")))
             add_label_value_if_useful(document, "Переход", section.get("transition"))
         add_list_if_useful(document, "Stop list:", as_list(dj.get("stop_list")))
