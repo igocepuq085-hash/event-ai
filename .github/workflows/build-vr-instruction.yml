@@ -1,5 +1,7 @@
 name: Build VR instruction
 on:
+  push:
+    branches: [ tmp-vr-instruction-20260730 ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
