@@ -1,0 +1,20 @@
+name: Build VR instruction
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install python-docx
+      - run: python tools/generate_vr_instruction.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vr-instruction-docx
+          path: artifacts/Инструкция_по_эксплуатации_VR_ПРОМВИАР_СФ_Газпромтранс.docx
